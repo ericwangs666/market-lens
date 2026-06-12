@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Market Lens | A股与美股市场工作台</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <section>
+        <div class="eyebrow">Market Lens</div>
+        <h1>A股与美股市场工作台</h1>
+        <p>追踪热门板块、龙头个股、近期走势和机构观点。当前是本地 MVP，结构已按云端部署和每日自动生成预留。</p>
+      </section>
+      <aside class="status-card">
+        <span class="status-dot"></span>
+        <strong id="runStatus">今日报告已生成</strong>
+        <small id="runTime">2026-06-12 22:19 CST</small>
+      </aside>
+    </header>
+
+    <nav class="tabs" aria-label="市场切换">
+      <button class="tab active" data-market="cn">A股</button>
+      <button class="tab" data-market="us">美股</button>
+      <button class="tab" data-market="watchlist">自选提醒</button>
+      <button class="tab" data-market="research">机构研报</button>
+      <button class="tab" data-market="deploy">云端部署</button>
+    </nav>
+
+    <section class="toolbar">
+      <label>
+        <span>搜索个股 / ETF</span>
+        <input id="searchInput" type="search" placeholder="例如：金钼股份、NVDA、券商" />
+      </label>
+      <div class="quick-filters">
+        <button data-filter="leaders">只看龙头</button>
+        <button data-filter="hot">热门板块</button>
+        <button data-filter="all">全部</button>
+      </div>
+    </section>
+
+    <section id="marketView" class="market-layout"></section>
+
+    <section id="watchlistView" class="watchlist-layout hidden">
+      <article class="panel">
+        <h2>个股备忘录</h2>
+        <p>记录你关注的个股、观察理由和涨幅提醒阈值。当前 MVP 保存在本机浏览器，部署后可升级为账号云同步。</p>
+        <form id="memoForm" class="memo-form">
+          <label>
+            <span>股票代码</span>
+            <input id="memoCode" required placeholder="例如：601958 / NVDA" />
+          </label>
+          <label>
+            <span>名称</span>
+            <input id="memoName" required placeholder="例如：金钼股份" />
+          </label>
+          <label>
+            <span>提醒阈值</span>
+            <input id="memoThreshold" required type="number" min="-20" max="50" step="0.1" value="5" />
+          </label>
+          <label class="wide-field">
+            <span>备忘录</span>
+            <input id="memoNote" placeholder="例如：钼价上涨，关注是否继续放量" />
+          </label>
+          <button type="submit">添加记录</button>
+        </form>
+      </article>
+      <article class="panel">
+        <h2>今日触发</h2>
+        <div id="alertList" class="alert-list"></div>
+      </article>
+      <article class="panel full-row">
+        <h2>我的记录</h2>
+        <div id="memoList" class="memo-list"></div>
+      </article>
+    </section>
+
+    <section id="researchView" class="research-layout hidden"></section>
+
+    <section id="deployView" class="deploy-layout hidden">
+      <article class="panel">
+        <h2>上线方案</h2>
+        <p>建议先用 Cloudflare Pages 或 Vercel 部署静态前端，再用一个定时任务每天生成 JSON 数据。页面读取最新 JSON 后自动刷新。</p>
+        <div class="roadmap">
+          <div><b>1</b><span>接入合法行情源：Tushare / 聚宽 / Alpha Vantage / Polygon / IEX Cloud / Nasdaq Data Link</span></div>
+          <div><b>2</b><span>每天收盘后生成 `daily/YYYY-MM-DD.json`，包含指数、板块、龙头股和研报链接</span></div>
+          <div><b>3</b><span>盘中定时拉取自选股行情，触发阈值后通过邮件、Telegram、企业微信或浏览器通知提醒</span></div>
+          <div><b>4</b><span>加登录、云端备忘录、自选股、告警历史和回看</span></div>
+        </div>
+      </article>
+      <article class="panel">
+        <h2>数据合规提醒</h2>
+        <p>东方财富、同花顺的页面数据适合个人查看和研究，不建议直接抓取后商用或公开分发。正式上线建议使用授权 API，并在页面标注延迟行情和来源。</p>
+      </article>
+    </section>
+  </main>
+
+  <script src="./data.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

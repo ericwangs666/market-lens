@@ -24,6 +24,7 @@
     <nav class="tabs" aria-label="市场切换">
       <button class="tab active" data-market="cn">A股</button>
       <button class="tab" data-market="us">美股</button>
+      <button class="tab" data-market="history">历史报告</button>
       <button class="tab" data-market="watchlist">自选提醒</button>
       <button class="tab" data-market="research">机构研报</button>
       <button class="tab" data-market="deploy">云端部署</button>
@@ -42,6 +43,16 @@
     </section>
 
     <section id="marketView" class="market-layout"></section>
+
+    <section id="historyView" class="history-layout hidden">
+      <article class="panel history-list-panel">
+        <h2>历史报告</h2>
+        <div id="historyList" class="history-list"></div>
+      </article>
+      <article class="panel history-detail-panel">
+        <div id="historyDetail" class="history-detail"></div>
+      </article>
+    </section>
 
     <section id="watchlistView" class="watchlist-layout hidden">
       <article class="panel">

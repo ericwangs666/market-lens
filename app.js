@@ -3,14 +3,19 @@ let currentMarket = "cn";
 let currentFilter = "all";
 
 const marketView = document.getElementById("marketView");
+const historyView = document.getElementById("historyView");
 const watchlistView = document.getElementById("watchlistView");
 const researchView = document.getElementById("researchView");
 const deployView = document.getElementById("deployView");
+const historyList = document.getElementById("historyList");
+const historyDetail = document.getElementById("historyDetail");
 const searchInput = document.getElementById("searchInput");
 const memoForm = document.getElementById("memoForm");
 const memoList = document.getElementById("memoList");
 const alertList = document.getElementById("alertList");
 const MEMO_KEY = "market-lens-memos";
+let historyIndex = null;
+let selectedHistoryDate = null;
 
 document.getElementById("runTime").textContent = data.lastRun;
 
@@ -40,11 +45,13 @@ function fmtPct(value) {
 }
 
 function render() {
-  marketView.classList.toggle("hidden", currentMarket === "research" || currentMarket === "deploy" || currentMarket === "watchlist");
+  marketView.classList.toggle("hidden", currentMarket === "research" || currentMarket === "deploy" || currentMarket === "watchlist" || currentMarket === "history");
+  historyView.classList.toggle("hidden", currentMarket !== "history");
   watchlistView.classList.toggle("hidden", currentMarket !== "watchlist");
   researchView.classList.toggle("hidden", currentMarket !== "research");
   deployView.classList.toggle("hidden", currentMarket !== "deploy");
 
+  if (currentMarket === "history") renderHistory();
   if (currentMarket === "research") renderResearch();
   if (currentMarket === "watchlist") renderWatchlist();
   if (currentMarket === "cn" || currentMarket === "us") renderMarket();
@@ -142,6 +149,136 @@ function drawSparkline(id, values) {
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
+}
+
+async function loadHistoryIndex() {
+  if (historyIndex) return historyIndex;
+  try {
+    const response = await fetch("./daily/index.json", { cache: "no-store" });
+    if (!response.ok) throw new Error("history index unavailable");
+    historyIndex = await response.json();
+  } catch {
+    historyIndex = data.historyReports || [{
+      date: data.generatedDate || data.lastRun.slice(0, 10),
+      file: "latest.json",
+      lastRun: data.lastRun
+    }];
+  }
+  if (!Array.isArray(historyIndex)) historyIndex = [historyIndex];
+  return historyIndex;
+}
+
+async function loadHistoryReport(item) {
+  if (!item || item.file === "latest.json") return data;
+  try {
+    const response = await fetch(`./daily/${item.file}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("history report unavailable");
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function renderHistory() {
+  historyList.innerHTML = `<div class="empty-state">正在读取历史报告...</div>`;
+  historyDetail.innerHTML = "";
+  const reports = await loadHistoryIndex();
+  if (!reports.length) {
+    historyList.innerHTML = `<div class="empty-state">还没有历史报告。每日生成后会自动出现在这里。</div>`;
+    return;
+  }
+
+  if (!selectedHistoryDate) selectedHistoryDate = reports[0].date;
+  historyList.innerHTML = reports.map((item) => `
+    <button class="history-date ${item.date === selectedHistoryDate ? "active" : ""}" data-history-date="${item.date}">
+      <strong>${item.date}</strong>
+      <span>${item.lastRun || item.file}</span>
+    </button>
+  `).join("");
+
+  document.querySelectorAll("[data-history-date]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedHistoryDate = button.dataset.historyDate;
+      renderHistory();
+    });
+  });
+
+  const selected = reports.find((item) => item.date === selectedHistoryDate) || reports[0];
+  const report = await loadHistoryReport(selected);
+  if (!report) {
+    historyDetail.innerHTML = `<div class="empty-state">这一天的报告暂时读取失败。</div>`;
+    return;
+  }
+  historyDetail.innerHTML = `
+    <header class="history-header">
+      <div>
+        <h2>${selected.date} 历史报告</h2>
+        <p>${report.lastRun || "历史数据"}</p>
+      </div>
+      <span>${selected.date === (data.generatedDate || "") ? "当前最新" : "历史归档"}</span>
+    </header>
+    <div class="history-market-grid">
+      ${["cn", "us"].map((marketName) => historyMarketPanel(report, marketName)).join("")}
+    </div>
+    <section class="compare-panel">
+      <h2>与当前最新对比</h2>
+      <div class="compare-grid">
+        ${["cn", "us"].map((marketName) => compareMarket(report, marketName)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function historyMarketPanel(report, marketName) {
+  const market = report.markets?.[marketName];
+  if (!market) return "";
+  const topSectors = [...market.sectors].sort((a, b) => b.pct - a.pct).slice(0, 4);
+  const topStocks = [...market.stocks].sort((a, b) => b.pct - a.pct).slice(0, 4);
+  return `
+    <section class="history-market">
+      <h3>${market.label}</h3>
+      <p>${market.summary}</p>
+      <h4>热门板块</h4>
+      ${topSectors.map((item) => `
+        <div class="history-row">
+          <span>${item.name}</span>
+          <strong class="${item.pct >= 0 ? "up" : "down"}">${fmtPct(item.pct)}</strong>
+        </div>
+      `).join("")}
+      <h4>龙头个股</h4>
+      ${topStocks.map((item) => `
+        <div class="history-row">
+          <span>${item.name} <small>${item.code}</small></span>
+          <strong class="${item.pct >= 0 ? "up" : "down"}">${fmtPct(item.pct)}</strong>
+        </div>
+      `).join("")}
+    </section>
+  `;
+}
+
+function compareMarket(report, marketName) {
+  const historical = report.markets?.[marketName];
+  const latest = data.markets?.[marketName];
+  if (!historical || !latest) return "";
+  const historicalSector = [...historical.sectors].sort((a, b) => b.pct - a.pct)[0];
+  const latestSector = [...latest.sectors].sort((a, b) => b.pct - a.pct)[0];
+  const historicalStock = [...historical.stocks].sort((a, b) => b.pct - a.pct)[0];
+  const latestStock = [...latest.stocks].sort((a, b) => b.pct - a.pct)[0];
+  return `
+    <article class="compare-card">
+      <h3>${latest.label}</h3>
+      <div>
+        <span>热门板块</span>
+        <p>${historicalSector?.name || "--"} ${historicalSector ? fmtPct(historicalSector.pct) : ""}</p>
+        <strong>当前：${latestSector?.name || "--"} ${latestSector ? fmtPct(latestSector.pct) : ""}</strong>
+      </div>
+      <div>
+        <span>龙头个股</span>
+        <p>${historicalStock?.name || "--"} ${historicalStock ? fmtPct(historicalStock.pct) : ""}</p>
+        <strong>当前：${latestStock?.name || "--"} ${latestStock ? fmtPct(latestStock.pct) : ""}</strong>
+      </div>
+    </article>
+  `;
 }
 
 function renderResearch() {

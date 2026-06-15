@@ -58,6 +58,42 @@ function ConvertTo-OrderedMarketData {
   }
 }
 
+function Get-HistoryReports {
+  param(
+    [string]$OutputDir,
+    [string]$CurrentDate,
+    [string]$CurrentLastRun
+  )
+
+  $items = @{}
+  if (Test-Path $OutputDir) {
+    Get-ChildItem -Path $OutputDir -Filter "*.json" -File |
+      Where-Object { $_.Name -notin @("latest.json", "index.json") } |
+      ForEach-Object {
+        $dateValue = $_.BaseName
+        $lastRunValue = $dateValue
+        try {
+          $report = Get-Content -Raw -Encoding UTF8 $_.FullName | ConvertFrom-Json
+          if ($report.lastRun) { $lastRunValue = $report.lastRun }
+        } catch {}
+
+        $items[$dateValue] = [ordered]@{
+          date = $dateValue
+          file = $_.Name
+          lastRun = $lastRunValue
+        }
+      }
+  }
+
+  $items[$CurrentDate] = [ordered]@{
+    date = $CurrentDate
+    file = "$CurrentDate.json"
+    lastRun = $CurrentLastRun
+  }
+
+  return $items.Values | Sort-Object -Property date -Descending
+}
+
 if (!(Test-Path $SeedPath)) {
   throw "Seed file not found: $SeedPath"
 }
@@ -67,11 +103,21 @@ $date = $now.ToString("yyyy-MM-dd")
 $lastRun = $now.ToString("yyyy-MM-dd HH:mm 'CST'")
 $seed = Get-Content -Raw -Encoding UTF8 $SeedPath | ConvertFrom-Json
 $marketData = ConvertTo-OrderedMarketData -Seed $seed -Date $date -LastRun $lastRun
+$historyReports = @(Get-HistoryReports -OutputDir $OutputDir -CurrentDate $date -CurrentLastRun $lastRun)
+$marketData["historyReports"] = $historyReports
 $json = $marketData | ConvertTo-Json -Depth 20
+$historyJson = "[" + (($historyReports | ForEach-Object { $_ | ConvertTo-Json -Depth 8 }) -join ",`n") + "]"
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 Set-Content -Path (Join-Path $OutputDir "$date.json") -Value $json -Encoding UTF8
 Set-Content -Path (Join-Path $OutputDir "latest.json") -Value $json -Encoding UTF8
+Set-Content -Path (Join-Path $OutputDir "index.json") -Value $historyJson -Encoding UTF8
+
+$rootDailyDir = "daily"
+New-Item -ItemType Directory -Force -Path $rootDailyDir | Out-Null
+Set-Content -Path (Join-Path $rootDailyDir "$date.json") -Value $json -Encoding UTF8
+Set-Content -Path (Join-Path $rootDailyDir "latest.json") -Value $json -Encoding UTF8
+Set-Content -Path (Join-Path $rootDailyDir "index.json") -Value $historyJson -Encoding UTF8
 
 $dataJsPath = Join-Path $SiteDir "data.js"
 $dataJs = "window.MARKET_DATA = $json;`n"

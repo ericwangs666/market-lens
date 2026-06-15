@@ -262,10 +262,139 @@ canvas {
 
 .research-layout,
 .deploy-layout,
-.watchlist-layout {
+.watchlist-layout,
+.history-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+}
+
+.history-layout {
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+
+.history-list-panel {
+  align-self: start;
+}
+
+.history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-date {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-date strong,
+.history-date span {
+  display: block;
+}
+
+.history-date span {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.history-date.active {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
+.history-date.active span {
+  color: rgba(255,255,255,0.72);
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.history-header h2,
+.history-header p {
+  margin: 0;
+}
+
+.history-header span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--blue);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.history-market-grid,
+.compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.history-market,
+.compare-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px;
+}
+
+.history-market h3,
+.compare-card h3 {
+  margin: 0 0 8px;
+}
+
+.history-market h4 {
+  margin: 14px 0 8px;
+  font-size: 14px;
+}
+
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 8px 0;
+}
+
+.history-row small {
+  color: var(--muted);
+}
+
+.compare-panel {
+  margin-top: 16px;
+}
+
+.compare-card div {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.compare-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.compare-card p,
+.compare-card strong {
+  display: block;
+  margin: 4px 0 0;
 }
 
 .research-card {
@@ -393,6 +522,8 @@ canvas {
   }
 
   .stock-grid { grid-template-columns: 1fr; }
+  .history-market-grid,
+  .compare-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 620px) {

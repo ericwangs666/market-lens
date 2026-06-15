@@ -1,5 +1,5 @@
 ﻿window.MARKET_DATA = {
-    "lastRun":  "2026-06-15 21:41 CST",
+    "lastRun":  "2026-06-15 22:24 CST",
     "generatedDate":  "2026-06-15",
     "source":  "market-seed",
     "sourceNote":  "Generated from data/market-seed.json. Replace this seed or extend the script with licensed market APIs for production data.",
@@ -367,6 +367,13 @@
                                    "触发后写入 alerts 表，并通过邮件、Telegram、企业微信、Server酱或浏览器 Push 推送。",
                                    "避免重复轰炸：同一股票同一规则每天只提醒一次，除非再次突破更高阈值。"
                                ]
-                }
+                },
+    "historyReports":  [
+                           {
+                               "date":  "2026-06-15",
+                               "file":  "2026-06-15.json",
+                               "lastRun":  "2026-06-15 22:24 CST"
+                           }
+                       ]
 };
 

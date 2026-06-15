@@ -23,4 +23,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Update daily market data"
-          file_pattern: data.js market-site/data.js market-site/daily/*.json
+          file_pattern: data.js daily/*.json market-site/data.js market-site/daily/*.json

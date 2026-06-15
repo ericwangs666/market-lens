@@ -1,0 +1,26 @@
+name: Generate daily market data
+
+on:
+  schedule:
+    - cron: "30 10 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate latest data
+        shell: pwsh
+        run: ./scripts/generate-daily-data.ps1
+
+      - name: Commit generated data
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update daily market data"
+          file_pattern: data.js market-site/data.js market-site/daily/*.json

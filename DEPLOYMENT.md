@@ -22,6 +22,27 @@
 3. 设置每日定时任务，收盘后生成最新数据文件。
 4. 页面读取最新 JSON，展示“今日已更新 / 更新失败 / 数据延迟”。
 
+## 每日数据生成
+
+当前项目已经内置一个无依赖生成脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\generate-daily-data.ps1
+```
+
+它会读取 `data/market-seed.json`，生成：
+
+```text
+market-site/daily/YYYY-MM-DD.json
+market-site/daily/latest.json
+market-site/data.js
+data.js
+```
+
+GitHub Actions 中的 `.github/workflows/daily-data.yml` 会在工作日自动执行，并把生成结果提交回 `main`。提交触发 `.github/workflows/pages.yml` 后，GitHub Pages 会发布 `market-site/`。
+
+接入真实行情时，优先在生成脚本里增加授权 API 采集逻辑，保留最终输出结构不变，这样前端无需大改。
+
 ## 下一步开发
 
 - 接入真实行情 API。

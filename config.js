@@ -1,0 +1,1 @@
+window.MARKET_LENS_UPDATE_ENDPOINT = "";

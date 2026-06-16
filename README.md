@@ -12,17 +12,16 @@ market-site/index.html
 
 ## Daily Data Generation
 
-Daily market data is generated from licensed API secrets when available, with seed data as a fallback:
+Daily market data is generated from AKShare and public delayed data sources, with seed data as a fallback:
 
 ```text
 data/market-seed.json
 ```
 
-GitHub Actions reads these repository secrets:
+GitHub Actions installs AKShare automatically before generating data:
 
 ```text
-TUSHARE_TOKEN
-ALPHA_VANTAGE_API_KEY
+python -m pip install -U pip akshare
 ```
 
 Run the API generator:
@@ -44,7 +43,31 @@ market-site/daily/YYYY-MM-DD.json
 market-site/realtime/latest.json
 ```
 
-If an API token is missing or a provider is rate-limited, the script keeps the current seed data so the site can still publish.
+If AKShare or a public data source is rate-limited, the script keeps the current seed data so the site can still publish.
+
+## Manual Update Backend
+
+The site can trigger the daily update directly from the page. For security, do not put a GitHub token in frontend code.
+
+This repo includes a Cloudflare Worker backend at:
+
+```text
+backend/cloudflare-worker/
+```
+
+Deploy it, set the Worker secret:
+
+```text
+GITHUB_TOKEN
+```
+
+Then put the Worker update endpoint in both `config.js` and `market-site/config.js`:
+
+```js
+window.MARKET_LENS_UPDATE_ENDPOINT = "https://your-worker.workers.dev/api/update";
+```
+
+Once configured, the page's "手动更新数据" button calls the backend directly and no longer asks for a browser token.
 
 ## GitHub Pages Deployment
 

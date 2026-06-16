@@ -1,0 +1,10 @@
+name = "market-lens-update"
+main = "src/index.js"
+compatibility_date = "2026-06-16"
+
+[vars]
+GITHUB_OWNER = "ericwangs666"
+GITHUB_REPO = "market-lens"
+GITHUB_WORKFLOW = "daily-data.yml"
+GITHUB_REF = "main"
+ALLOWED_ORIGIN = "https://ericwangs666.github.io"

@@ -20,6 +20,7 @@ const providerStatus = document.getElementById("providerStatus");
 const MEMO_KEY = "market-lens-memos";
 const UPDATE_TOKEN_KEY = "market-lens-github-token";
 const WORKFLOW_DISPATCH_URL = "https://api.github.com/repos/ericwangs666/market-lens/actions/workflows/daily-data.yml/dispatches";
+const UPDATE_BACKEND_ENDPOINT = (window.MARKET_LENS_UPDATE_ENDPOINT || "").trim();
 let historyIndex = null;
 let selectedHistoryDate = null;
 
@@ -29,7 +30,7 @@ renderProviderStatus();
 manualUpdateButton?.addEventListener("click", triggerManualUpdate);
 clearUpdateTokenButton?.addEventListener("click", () => {
   localStorage.removeItem(UPDATE_TOKEN_KEY);
-  setManualUpdateStatus("已清除本机授权，下次更新会重新询问 token。");
+  setManualUpdateStatus(UPDATE_BACKEND_ENDPOINT ? "后端触发器已启用，无需本机授权。" : "已清除本机授权，下次更新会重新询问 token。");
 });
 
 document.querySelectorAll(".tab").forEach((button) => {
@@ -85,6 +86,11 @@ function renderProviderStatus() {
 }
 
 async function triggerManualUpdate() {
+  if (UPDATE_BACKEND_ENDPOINT) {
+    await triggerBackendUpdate();
+    return;
+  }
+
   let token = localStorage.getItem(UPDATE_TOKEN_KEY);
   if (!token) {
     token = window.prompt("粘贴 GitHub token（需要 Actions 写入权限，只保存在当前浏览器）：");
@@ -120,6 +126,30 @@ async function triggerManualUpdate() {
     setManualUpdateStatus(`提交失败：GitHub 返回 ${response.status}。`, true);
   } catch (error) {
     setManualUpdateStatus("提交失败：网络连接异常。", true);
+  } finally {
+    manualUpdateButton.disabled = false;
+  }
+}
+
+async function triggerBackendUpdate() {
+  manualUpdateButton.disabled = true;
+  setManualUpdateStatus("正在通过后端提交更新任务...");
+  try {
+    const response = await fetch(UPDATE_BACKEND_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ source: "market-lens-page" }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (response.ok && result.ok !== false) {
+      setManualUpdateStatus("更新任务已提交，约 1 分钟后刷新页面查看。");
+      return;
+    }
+    setManualUpdateStatus(result.message || `提交失败：后端返回 ${response.status}。`, true);
+  } catch (error) {
+    setManualUpdateStatus("提交失败：后端连接异常。", true);
   } finally {
     manualUpdateButton.disabled = false;
   }

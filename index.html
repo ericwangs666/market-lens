@@ -18,7 +18,12 @@
         <span class="status-dot"></span>
         <strong id="runStatus">今日报告已生成</strong>
         <small id="runTime">2026-06-12 22:19 CST</small>
-        <a class="manual-update" href="https://github.com/ericwangs666/market-lens/actions/workflows/daily-data.yml" target="_blank" rel="noopener">手动更新数据</a>
+        <div id="providerStatus" class="provider-status"></div>
+        <div class="manual-actions">
+          <button id="manualUpdateButton" class="manual-update" type="button">手动更新数据</button>
+          <button id="clearUpdateTokenButton" class="manual-clear" type="button">清除授权</button>
+        </div>
+        <small id="manualUpdateStatus" class="manual-update-status"></small>
       </aside>
     </header>
 

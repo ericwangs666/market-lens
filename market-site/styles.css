@@ -90,9 +90,32 @@ p {
 .status-card strong { font-size: 22px; }
 .status-card small { color: var(--muted); }
 
+.provider-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.provider-status span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.manual-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .manual-update {
   width: fit-content;
-  margin-top: 12px;
   border: 1px solid rgba(25, 72, 123, 0.28);
   border-radius: 6px;
   background: var(--blue);
@@ -101,10 +124,36 @@ p {
   font-size: 13px;
   font-weight: 800;
   text-decoration: none;
+  cursor: pointer;
 }
 
 .manual-update:hover {
   background: #123f6c;
+}
+
+.manual-update:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.manual-clear {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  padding: 9px 10px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.manual-update-status {
+  min-height: 18px;
+  color: var(--muted);
+}
+
+.manual-update-status.error {
+  color: var(--red);
 }
 
 .tabs {

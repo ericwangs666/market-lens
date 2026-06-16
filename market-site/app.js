@@ -13,11 +13,24 @@ const searchInput = document.getElementById("searchInput");
 const memoForm = document.getElementById("memoForm");
 const memoList = document.getElementById("memoList");
 const alertList = document.getElementById("alertList");
+const manualUpdateButton = document.getElementById("manualUpdateButton");
+const clearUpdateTokenButton = document.getElementById("clearUpdateTokenButton");
+const manualUpdateStatus = document.getElementById("manualUpdateStatus");
+const providerStatus = document.getElementById("providerStatus");
 const MEMO_KEY = "market-lens-memos";
+const UPDATE_TOKEN_KEY = "market-lens-github-token";
+const WORKFLOW_DISPATCH_URL = "https://api.github.com/repos/ericwangs666/market-lens/actions/workflows/daily-data.yml/dispatches";
 let historyIndex = null;
 let selectedHistoryDate = null;
 
 document.getElementById("runTime").textContent = data.lastRun;
+renderProviderStatus();
+
+manualUpdateButton?.addEventListener("click", triggerManualUpdate);
+clearUpdateTokenButton?.addEventListener("click", () => {
+  localStorage.removeItem(UPDATE_TOKEN_KEY);
+  setManualUpdateStatus("已清除本机授权，下次更新会重新询问 token。");
+});
 
 document.querySelectorAll(".tab").forEach((button) => {
   button.addEventListener("click", () => {
@@ -42,6 +55,64 @@ searchInput.addEventListener("input", () => renderMarket());
 function fmtPct(value) {
   if (value === null || value === undefined) return "--";
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function setManualUpdateStatus(message, isError = false) {
+  if (!manualUpdateStatus) return;
+  manualUpdateStatus.textContent = message;
+  manualUpdateStatus.classList.toggle("error", isError);
+}
+
+function renderProviderStatus() {
+  if (!providerStatus) return;
+  const status = data.providerStatus || {};
+  const messages = [];
+  const cnStatus = String(status.cn || "");
+  const usStatus = String(status.us || "");
+  messages.push(cnStatus.includes("seed") || cnStatus.includes("no usable") ? "A股：备用数据" : "A股：已更新");
+  messages.push(usStatus.includes("missing") || usStatus.includes("seed") ? "美股：备用数据" : "美股：已更新");
+  providerStatus.innerHTML = messages.map((message) => `<span>${message}</span>`).join("");
+}
+
+async function triggerManualUpdate() {
+  let token = localStorage.getItem(UPDATE_TOKEN_KEY);
+  if (!token) {
+    token = window.prompt("粘贴 GitHub token（需要 Actions 写入权限，只保存在当前浏览器）：");
+    if (!token) {
+      setManualUpdateStatus("已取消更新。");
+      return;
+    }
+    localStorage.setItem(UPDATE_TOKEN_KEY, token.trim());
+  }
+
+  manualUpdateButton.disabled = true;
+  setManualUpdateStatus("正在提交更新任务...");
+  try {
+    const response = await fetch(WORKFLOW_DISPATCH_URL, {
+      method: "POST",
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "Authorization": `Bearer ${token.trim()}`,
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      body: JSON.stringify({ ref: "main" }),
+    });
+    if (response.status === 204) {
+      setManualUpdateStatus("更新任务已提交，约 1 分钟后刷新页面查看。");
+      return;
+    }
+    if (response.status === 401 || response.status === 403) {
+      localStorage.removeItem(UPDATE_TOKEN_KEY);
+      setManualUpdateStatus("授权失败，请重新填写有 Actions 写入权限的 GitHub token。", true);
+      return;
+    }
+    setManualUpdateStatus(`提交失败：GitHub 返回 ${response.status}。`, true);
+  } catch (error) {
+    setManualUpdateStatus("提交失败：网络连接异常。", true);
+  } finally {
+    manualUpdateButton.disabled = false;
+  }
 }
 
 function sectorStocks(market, sector) {

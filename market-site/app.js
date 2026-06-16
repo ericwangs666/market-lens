@@ -44,6 +44,41 @@ function fmtPct(value) {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+function sectorStocks(market, sector) {
+  const name = String(sector.name || "").toLowerCase();
+  return market.stocks
+    .filter((stock) => {
+      const sectorName = String(stock.sector || "").toLowerCase();
+      const text = `${stock.name || ""} ${stock.code || ""} ${stock.sector || ""} ${stock.type || ""} ${stock.reason || ""}`.toLowerCase();
+      return sectorName === name || sectorName.includes(name) || name.includes(sectorName) || text.includes(name);
+    })
+    .sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
+}
+
+function sectorCard(market, sector) {
+  const stocks = sectorStocks(market, sector).slice(0, 4);
+  return `
+    <article class="sector-card">
+      <div class="bar-row">
+        <strong title="${sector.name}">${sector.name}</strong>
+        <div class="track"><div class="fill" style="width:${Math.max(6, Math.min(100, Math.abs(sector.pct) * 10))}%"></div></div>
+        <span class="${sector.pct >= 0 ? "up" : "down"}">${fmtPct(sector.pct)}</span>
+      </div>
+      <div class="sector-stocks">
+        ${stocks.map((stock) => `
+          <div class="sector-stock">
+            <span>
+              <strong title="${stock.name}">${stock.name}</strong>
+              <small>${stock.code} · ${stock.type}</small>
+            </span>
+            <em class="${stock.pct >= 0 ? "up" : "down"}">${fmtPct(stock.pct)}</em>
+          </div>
+        `).join("") || "<div class=\"sector-empty\">暂无匹配个股</div>"}
+      </div>
+    </article>
+  `;
+}
+
 function render() {
   marketView.classList.toggle("hidden", currentMarket === "research" || currentMarket === "deploy" || currentMarket === "watchlist" || currentMarket === "history");
   historyView.classList.toggle("hidden", currentMarket !== "history");
@@ -85,13 +120,7 @@ function renderMarket() {
       </div>
       <h2 style="margin-top:22px;">热门板块</h2>
       <div class="bars">
-        ${market.sectors.map((item) => `
-          <div class="bar-row">
-            <strong title="${item.name}">${item.name}</strong>
-            <div class="track"><div class="fill" style="width:${Math.max(6, Math.min(100, Math.abs(item.pct) * 10))}%"></div></div>
-            <span class="${item.pct >= 0 ? "up" : "down"}">${fmtPct(item.pct)}</span>
-          </div>
-        `).join("")}
+        ${market.sectors.map((item) => sectorCard(market, item)).join("")}
       </div>
     </section>
     <section class="panel">

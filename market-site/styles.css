@@ -182,6 +182,14 @@ input {
 .down { color: var(--green); }
 
 .bars { display: grid; gap: 12px; }
+
+.sector-card {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+}
+
 .bar-row {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr) 70px;
@@ -200,6 +208,57 @@ input {
   height: 100%;
   background: linear-gradient(90deg, var(--gold), var(--red));
   border-radius: 999px;
+}
+
+.sector-stocks {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.sector-stock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 8px 10px;
+}
+
+.sector-stock span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sector-stock strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.sector-stock small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sector-stock em {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.sector-empty {
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 10px;
 }
 
 .stock-grid {

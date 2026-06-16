@@ -81,6 +81,58 @@ def tushare_call(token, api_name, params, fields):
     return [dict(zip(field_names, row)) for row in rows]
 
 
+def is_permission_error(exc):
+    message = str(exc)
+    return "权限" in message or "permission" in message.lower() or "没有接口" in message
+
+
+def compact_warning(status, key, message):
+    warnings = status.setdefault(key, [])
+    if message not in warnings:
+        warnings.append(message)
+
+
+def fetch_tushare_basics(token, status, end_date):
+    basics = {}
+    calendar_rows = []
+
+    try:
+        start_date = (china_now() - timedelta(days=14)).strftime("%Y%m%d")
+        calendar_rows = tushare_call(
+            token,
+            "trade_cal",
+            {"exchange": "SSE", "start_date": start_date, "end_date": end_date},
+            "cal_date,is_open,pretrade_date",
+        )
+        open_days = [row["cal_date"] for row in calendar_rows if str(row.get("is_open")) == "1"]
+        if open_days:
+            status["cnTradeCalendar"] = {
+                "latestOpenDate": open_days[-1],
+                "recentOpenDays": open_days[-5:],
+            }
+    except Exception as exc:
+        compact_warning(status, "cnWarnings", f"trade_cal unavailable: {exc}")
+
+    try:
+        stock_rows = tushare_call(
+            token,
+            "stock_basic",
+            {"list_status": "L"},
+            "ts_code,symbol,name,area,industry,list_date",
+        )
+        for row in stock_rows:
+            basics[row.get("symbol")] = row
+            basics[row.get("ts_code")] = row
+        status["cnStockBasic"] = {
+            "count": len(stock_rows),
+            "matched": 0,
+        }
+    except Exception as exc:
+        compact_warning(status, "cnWarnings", f"stock_basic unavailable: {exc}")
+
+    return basics, calendar_rows
+
+
 def stock_to_ts_code(code):
     code = str(code).strip()
     if "." in code:
@@ -115,8 +167,14 @@ def apply_tushare(seed, market_data, status):
     start_date = (china_now() - timedelta(days=120)).strftime("%Y%m%d")
     cn = market_data["markets"]["cn"]
     updates = 0
+    basics, _calendar_rows = fetch_tushare_basics(token, status, end_date)
+    matched_basics = 0
+    index_daily_blocked = False
+    daily_blocked = False
 
     for metric in cn.get("metrics", []):
+        if index_daily_blocked:
+            break
         ts_code = CN_INDEX_CODES.get(metric.get("name"))
         if not ts_code:
             continue
@@ -128,11 +186,27 @@ def apply_tushare(seed, market_data, status):
                 metric["pct"] = rounded(latest.get("pct_chg"))
                 updates += 1
         except Exception as exc:
-            status.setdefault("cnWarnings", []).append(f"{metric.get('name')}: {exc}")
+            if is_permission_error(exc):
+                status["cnIndexDaily"] = "no access to index_daily; keeping seed index data"
+                index_daily_blocked = True
+            else:
+                compact_warning(status, "cnWarnings", f"{metric.get('name')}: {exc}")
 
     for stock in cn.get("stocks", []):
+        ts_code = stock_to_ts_code(stock["code"])
+        basic = basics.get(str(stock.get("code"))) or basics.get(ts_code)
+        if basic:
+            matched_basics += 1
+            stock["profile"] = {
+                "tsCode": basic.get("ts_code"),
+                "area": basic.get("area"),
+                "industry": basic.get("industry"),
+                "listDate": basic.get("list_date"),
+            }
+        if daily_blocked:
+            continue
         try:
-            rows = fetch_tushare_series(token, "daily", stock_to_ts_code(stock["code"]), start_date, end_date)
+            rows = fetch_tushare_series(token, "daily", ts_code, start_date, end_date)
             closes = [float(row["close"]) for row in rows]
             if closes:
                 latest = rows[-1]
@@ -144,9 +218,20 @@ def apply_tushare(seed, market_data, status):
                 stock["reason"] = f"已接入 Tushare 日线数据，最新交易日 {latest['trade_date']}。"
                 updates += 1
         except Exception as exc:
-            status.setdefault("cnWarnings", []).append(f"{stock.get('code')}: {exc}")
+            if is_permission_error(exc):
+                status["cnDaily"] = "no access to daily; keeping seed stock quotes"
+                daily_blocked = True
+            else:
+                compact_warning(status, "cnWarnings", f"{stock.get('code')}: {exc}")
 
-    status["cn"] = f"Tushare updated {updates} CN items" if updates else "Tushare returned no usable CN data"
+    if "cnStockBasic" in status:
+        status["cnStockBasic"]["matched"] = matched_basics
+    if updates:
+        status["cn"] = f"Tushare updated {updates} CN quote items"
+    elif matched_basics or status.get("cnTradeCalendar"):
+        status["cn"] = "Tushare token works for low-permission metadata; quote data is using seed fallback"
+    else:
+        status["cn"] = "Tushare returned no usable CN data"
 
 
 def alpha_query(params):

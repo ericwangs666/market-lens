@@ -1,4 +1,6 @@
 tools/
 repo-git/
+.ssh/
+scripts/__pycache__/
 *.zip
 a-share-report-2026-06-12.html

@@ -20,6 +20,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install data dependencies
+        run: python -m pip install -U pip akshare
+
       - name: Generate latest data
         env:
           KPL_SECTOR_STRENGTH_URL: ${{ secrets.KPL_SECTOR_STRENGTH_URL }}

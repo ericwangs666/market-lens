@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import sys
@@ -34,6 +35,13 @@ CN_INDEX_CODES = {
     "沪深300": "sh000300",
 }
 
+CN_INDEX_AK_CODES = {
+    "上证指数": "000001",
+    "深证成指": "399001",
+    "创业板指": "399006",
+    "沪深300": "000300",
+}
+
 
 def china_now():
     if ZoneInfo:
@@ -49,6 +57,27 @@ def pct_change(values, sessions):
     if not base:
         return None
     return round((latest / base - 1) * 100, 2)
+
+
+def is_blank(value):
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    return str(value).strip() in {"", "-", "nan", "None"}
+
+
+def as_text(value):
+    return "" if is_blank(value) else str(value).strip()
+
+
+def as_number(value, default=None):
+    if is_blank(value):
+        return default
+    try:
+        return round(float(str(value).replace(",", "").replace("%", "")), 2)
+    except (TypeError, ValueError):
+        return default
 
 
 def compact_warning(status, key, message):
@@ -79,6 +108,32 @@ def request_text(url, referer, retries=3, extra_headers=None):
 
 def request_json(url, referer, retries=3, extra_headers=None):
     return json.loads(request_text(url, referer, retries, extra_headers))
+
+
+def df_records(df):
+    return df.fillna("").to_dict("records")
+
+
+def load_akshare(status):
+    try:
+        import akshare as ak  # type: ignore
+        return ak
+    except Exception as exc:
+        compact_warning(status, "akshareWarnings", f"AKShare unavailable: {exc}")
+        return None
+
+
+def call_akshare(fetcher, label, status, attempts=3):
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            return fetcher()
+        except Exception as exc:
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(1.5 * (attempt + 1))
+    compact_warning(status, "akshareWarnings", f"{label} unavailable: {last_error}")
+    return None
 
 
 def cn_symbol(code):
@@ -136,6 +191,16 @@ def fetch_sina_us_daily(symbol):
     return parse_sina_us_jsonp(text)
 
 
+def update_quote_from_closes(target, closes, latest_date, provider_name):
+    if len(closes) >= 2 and closes[-2]:
+        target["pct"] = round((closes[-1] / closes[-2] - 1) * 100, 2)
+    target["prices"] = [round(value, 2) for value in closes[-6:]]
+    target["d5"] = pct_change(closes, 5)
+    target["d20"] = pct_change(closes, 20)
+    target["d60"] = pct_change(closes, 60)
+    target["reason"] = f"已接入{provider_name}延迟日线数据，最新交易日 {latest_date}。"
+
+
 def find_first_list(value):
     if isinstance(value, list):
         return value
@@ -151,22 +216,20 @@ def find_first_list(value):
     return []
 
 
-def number_from_keys(row, keys):
+def number_from_keys(row, keys, default=0):
     for key in keys:
         value = row.get(key)
-        if value not in (None, "", "-"):
-            try:
-                return round(float(value), 2)
-            except (TypeError, ValueError):
-                continue
-    return 0
+        parsed = as_number(value)
+        if parsed is not None:
+            return parsed
+    return default
 
 
 def text_from_keys(row, keys):
     for key in keys:
-        value = row.get(key)
-        if value not in (None, "", "-"):
-            return str(value)
+        value = as_text(row.get(key))
+        if value:
+            return value
     return ""
 
 
@@ -178,18 +241,16 @@ def normalize_sector_stock(name, code, pct=None, type_name="领涨股"):
         "code": str(code or ""),
         "type": type_name,
     }
-    if pct not in (None, "", "-"):
-        try:
-            stock["pct"] = round(float(pct), 2)
-        except (TypeError, ValueError):
-            pass
+    parsed_pct = as_number(pct)
+    if parsed_pct is not None:
+        stock["pct"] = parsed_pct
     return stock
 
 
 def fetch_kpl_sectors(status):
     url = os.environ.get("KPL_SECTOR_STRENGTH_URL", "").strip()
     if not url:
-        status["cnSectors"] = "KPL sector source not configured; using public fallback"
+        status["cnSectors"] = "KPL sector source not configured; using AKShare"
         return []
 
     headers = {}
@@ -211,7 +272,6 @@ def fetch_kpl_sectors(status):
         name = text_from_keys(row, ("name", "Name", "plate_name", "PlateName", "sector_name", "SectorName", "title"))
         if not name:
             continue
-        pct = number_from_keys(row, ("pct", "Pct", "change", "Change", "change_pct", "ChangePct", "zf", "ZhangFu", "strength", "Strength"))
         leader = normalize_sector_stock(
             text_from_keys(row, ("leader", "Leader", "stock_name", "StockName", "lead_stock_name")),
             text_from_keys(row, ("leader_code", "LeaderCode", "stock_code", "StockCode", "lead_stock_code")),
@@ -219,7 +279,7 @@ def fetch_kpl_sectors(status):
         )
         sector = {
             "name": name,
-            "pct": pct,
+            "pct": number_from_keys(row, ("pct", "Pct", "change", "Change", "change_pct", "ChangePct", "zf", "ZhangFu", "strength", "Strength")),
             "status": "开盘啦板块强度",
             "source": "开盘啦",
         }
@@ -231,6 +291,97 @@ def fetch_kpl_sectors(status):
     if sectors:
         status["cnSectors"] = f"KPL sector strength updated {len(sectors[:8])} sectors"
     return sectors[:8]
+
+
+def fetch_akshare_sector_stocks(ak, sector_name, board_type, status):
+    if board_type == "industry":
+        fetcher = lambda: ak.stock_board_industry_cons_em(symbol=sector_name)
+    else:
+        fetcher = lambda: ak.stock_board_concept_cons_em(symbol=sector_name)
+    df = call_akshare(fetcher, f"{sector_name} constituents", status, attempts=2)
+    if df is None:
+        return []
+
+    stocks = []
+    for row in df_records(df):
+        name = text_from_keys(row, ("名称", "股票名称", "证券名称"))
+        code = text_from_keys(row, ("代码", "股票代码", "证券代码"))
+        pct = number_from_keys(row, ("涨跌幅", "涨幅", "change_pct"), None)
+        if name:
+            stocks.append({
+                "name": name,
+                "code": code,
+                "pct": pct,
+                "type": "板块成分股",
+            })
+    stocks.sort(key=lambda item: item.get("pct") if item.get("pct") is not None else -999, reverse=True)
+    return stocks[:4]
+
+
+def akshare_sector_from_row(row, board_type):
+    name = text_from_keys(row, ("板块名称", "名称", "行业名称", "概念名称"))
+    if not name:
+        return None
+    if name.startswith("昨日"):
+        return None
+
+    pct = number_from_keys(row, ("涨跌幅", "涨幅", "change_pct"), None)
+    if pct is None:
+        return None
+
+    leader = normalize_sector_stock(
+        text_from_keys(row, ("领涨股票", "领涨股", "领涨名称")),
+        text_from_keys(row, ("领涨股票代码", "领涨代码", "代码")),
+        number_from_keys(row, ("领涨股票-涨跌幅", "领涨涨跌幅", "领涨股涨跌幅"), None),
+    )
+    source_label = "AKShare 行业板块" if board_type == "industry" else "AKShare 概念板块"
+    sector = {
+        "name": name,
+        "pct": pct,
+        "status": source_label,
+        "source": source_label,
+        "boardType": board_type,
+        "code": text_from_keys(row, ("板块代码", "代码")),
+    }
+    if leader:
+        sector["stocks"] = [leader]
+    return sector
+
+
+def fetch_akshare_sectors(ak, status):
+    sectors = []
+    for board_type, fetcher_name in (
+        ("industry", "stock_board_industry_name_em"),
+        ("concept", "stock_board_concept_name_em"),
+    ):
+        fetcher = getattr(ak, fetcher_name)
+        df = call_akshare(fetcher, f"AKShare {board_type} sectors", status)
+        if df is None:
+            continue
+        rows = df_records(df)
+        for row in rows:
+            sector = akshare_sector_from_row(row, board_type)
+            if sector:
+                sectors.append(sector)
+
+    seen = set()
+    deduped = []
+    for sector in sorted(sectors, key=lambda item: item.get("pct", 0), reverse=True):
+        if sector["name"] in seen:
+            continue
+        seen.add(sector["name"])
+        deduped.append(sector)
+
+    top_sectors = deduped[:8]
+    for sector in top_sectors:
+        board_type = sector.pop("boardType", "concept")
+        stocks = fetch_akshare_sector_stocks(ak, sector["name"], board_type, status)
+        if stocks:
+            sector["stocks"] = stocks
+
+    if top_sectors:
+        status["cnSectors"] = f"AKShare board strength updated {len(top_sectors)} sectors"
+    return top_sectors
 
 
 def fetch_eastmoney_board_rows(fs, limit=20):
@@ -285,9 +436,11 @@ def fetch_public_sector_strength(status):
     return sectors[:8]
 
 
-def apply_cn_sector_strength(market_data, status):
+def apply_cn_sector_strength(market_data, status, ak=None):
     cn = market_data["markets"]["cn"]
     sectors = fetch_kpl_sectors(status)
+    if not sectors and ak:
+        sectors = fetch_akshare_sectors(ak, status)
     if not sectors:
         sectors = fetch_public_sector_strength(status)
     cn["sectors"] = sectors
@@ -295,14 +448,57 @@ def apply_cn_sector_strength(market_data, status):
         status["cnSectors"] = "No full-market sector strength source available"
 
 
-def update_quote_from_closes(target, closes, latest_date, provider_name):
-    if len(closes) >= 2 and closes[-2]:
-        target["pct"] = round((closes[-1] / closes[-2] - 1) * 100, 2)
-    target["prices"] = [round(value, 2) for value in closes[-6:]]
-    target["d5"] = pct_change(closes, 5)
-    target["d20"] = pct_change(closes, 20)
-    target["d60"] = pct_change(closes, 60)
-    target["reason"] = f"已接入{provider_name}延迟日线数据，最新交易日 {latest_date}。"
+def apply_akshare_cn_quotes(market_data, status, ak):
+    cn = market_data["markets"]["cn"]
+    updates = 0
+
+    try:
+        spot_df = call_akshare(ak.stock_zh_a_spot_em, "stock_zh_a_spot_em", status)
+        spot_rows = df_records(spot_df) if spot_df is not None else []
+        spot_by_code = {as_text(row.get("代码")).zfill(6): row for row in spot_rows if as_text(row.get("代码"))}
+    except Exception as exc:
+        compact_warning(status, "akshareWarnings", f"stock_zh_a_spot_em unavailable: {exc}")
+        spot_by_code = {}
+
+    for stock in cn.get("stocks", []):
+        code = as_text(stock.get("code")).zfill(6)
+        row = spot_by_code.get(code)
+        if not row:
+            continue
+        latest = as_number(row.get("最新价"))
+        pct = as_number(row.get("涨跌幅"))
+        if pct is not None:
+            stock["pct"] = pct
+        if latest is not None:
+            stock["latestPrice"] = latest
+        stock["turnover"] = row.get("成交额")
+        stock["turnoverRate"] = row.get("换手率")
+        stock["reason"] = "已接入 AKShare 全 A 行情数据，涨跌幅与成交额来自公开行情源。"
+        updates += 1
+
+    status["cnAkshareQuotes"] = f"AKShare spot updated {updates} CN stocks" if updates else "AKShare spot returned no watched stocks"
+
+    try:
+        index_df = call_akshare(ak.stock_zh_index_spot_em, "stock_zh_index_spot_em", status)
+        index_rows = df_records(index_df) if index_df is not None else []
+    except Exception as exc:
+        compact_warning(status, "akshareWarnings", f"stock_zh_index_spot_em unavailable: {exc}")
+        index_rows = []
+
+    for metric in cn.get("metrics", []):
+        expected_code = CN_INDEX_AK_CODES.get(metric.get("name"))
+        for row in index_rows:
+            code = as_text(row.get("代码")).zfill(6)
+            name = as_text(row.get("名称"))
+            if expected_code and code != expected_code and metric.get("name") != name:
+                continue
+            value = as_number(row.get("最新价"))
+            pct = as_number(row.get("涨跌幅"))
+            if value is not None:
+                metric["value"] = f"{value:.2f}"
+            if pct is not None:
+                metric["pct"] = pct
+            break
 
 
 def apply_sina_cn(market_data, status):
@@ -390,8 +586,8 @@ def build_market_data(seed, date_value, last_run):
     market_data = {
         "lastRun": last_run,
         "generatedDate": date_value,
-        "source": "public-delayed-web-data",
-        "sourceNote": "Generated by scripts/fetch-market-data.py from Sina Finance public delayed daily data. Missing or failed sources fall back to data/market-seed.json.",
+        "source": "akshare-public-delayed-data",
+        "sourceNote": "Generated by scripts/fetch-market-data.py from AKShare, KPL when configured, and public delayed web data. Missing or failed sources fall back to data/market-seed.json.",
         "markets": {},
         "research": deepcopy(seed.get("research", [])),
         "apiPlan": deepcopy(seed.get("apiPlan", {})),
@@ -469,8 +665,11 @@ def main():
     market_data = build_market_data(seed, date_value, last_run)
 
     provider_status = market_data["providerStatus"]
+    ak = load_akshare(provider_status)
     apply_sina_cn(market_data, provider_status)
-    apply_cn_sector_strength(market_data, provider_status)
+    if ak:
+        apply_akshare_cn_quotes(market_data, provider_status, ak)
+    apply_cn_sector_strength(market_data, provider_status, ak)
     apply_sina_us(market_data, provider_status)
     write_outputs(market_data)
 

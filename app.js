@@ -74,11 +74,9 @@ function renderProviderStatus() {
   messages.push(
     sectorStatus.includes("KPL")
       ? "板块：开盘啦"
-      : sectorStatus.includes("Local")
-        ? "板块：观察池"
-        : sectorStatus
-          ? "板块：公开排行"
-          : "板块：备用"
+      : sectorStatus.includes("Public")
+        ? "板块：公开排行"
+        : "板块：未获取"
   );
   messages.push(usStatus.includes("missing") || usStatus.includes("seed") ? "美股：备用数据" : "美股：已更新");
   providerStatus.innerHTML = messages.map((message) => `<span>${message}</span>`).join("");
@@ -204,7 +202,7 @@ function renderMarket() {
       </div>
       <h2 style="margin-top:22px;">热门板块</h2>
       <div class="bars">
-        ${market.sectors.map((item) => sectorCard(market, item)).join("")}
+        ${market.sectors.length ? market.sectors.map((item) => sectorCard(market, item)).join("") : "<div class=\"sector-empty sector-unavailable\">未获取到全市场板块强度，暂不展示热门板块。</div>"}
       </div>
     </section>
     <section class="panel">

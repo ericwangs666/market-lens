@@ -285,52 +285,14 @@ def fetch_public_sector_strength(status):
     return sectors[:8]
 
 
-def build_stock_sector_strength(market_data, status):
-    groups = {}
-    for stock in market_data["markets"]["cn"].get("stocks", []):
-        sector = stock.get("sector") or "观察池"
-        groups.setdefault(sector, []).append(stock)
-
-    sectors = []
-    for name, stocks in groups.items():
-        ranked = sorted(
-            stocks,
-            key=lambda item: item.get("pct") if item.get("pct") is not None else -999,
-            reverse=True,
-        )
-        pct_values = [stock.get("pct") for stock in ranked if stock.get("pct") is not None]
-        strength = round(sum(pct_values) / len(pct_values), 2) if pct_values else 0
-        sectors.append({
-            "name": name,
-            "pct": strength,
-            "status": "观察池涨幅计算",
-            "source": "本地观察池",
-            "stocks": [
-                {
-                    "name": stock.get("name"),
-                    "code": stock.get("code"),
-                    "pct": stock.get("pct"),
-                    "type": stock.get("type"),
-                }
-                for stock in ranked[:4]
-            ],
-        })
-
-    sectors.sort(key=lambda item: item.get("pct", 0), reverse=True)
-    if sectors:
-        status["cnSectors"] = "Local watchlist sector strength fallback"
-    return sectors[:8]
-
-
 def apply_cn_sector_strength(market_data, status):
     cn = market_data["markets"]["cn"]
     sectors = fetch_kpl_sectors(status)
     if not sectors:
         sectors = fetch_public_sector_strength(status)
+    cn["sectors"] = sectors
     if not sectors:
-        sectors = build_stock_sector_strength(market_data, status)
-    if sectors:
-        cn["sectors"] = sectors
+        status["cnSectors"] = "No full-market sector strength source available"
 
 
 def update_quote_from_closes(target, closes, latest_date, provider_name):

@@ -12,28 +12,39 @@ market-site/index.html
 
 ## Daily Data Generation
 
-Daily market data is generated from:
+Daily market data is generated from licensed API secrets when available, with seed data as a fallback:
 
 ```text
 data/market-seed.json
 ```
 
-Run it locally:
+GitHub Actions reads these repository secrets:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\generate-daily-data.ps1
+```text
+TUSHARE_TOKEN
+ALPHA_VANTAGE_API_KEY
+```
+
+Run the API generator:
+
+```text
+python scripts/fetch-market-data.py
 ```
 
 The script updates:
 
 ```text
 data.js
+daily/latest.json
+daily/YYYY-MM-DD.json
+realtime/latest.json
 market-site/data.js
 market-site/daily/latest.json
 market-site/daily/YYYY-MM-DD.json
+market-site/realtime/latest.json
 ```
 
-For production, replace or enrich `data/market-seed.json` in the script with licensed market APIs such as Tushare Pro, Polygon, IEX Cloud, Alpha Vantage, or Nasdaq Data Link.
+If an API token is missing or a provider is rate-limited, the script keeps the current seed data so the site can still publish.
 
 ## GitHub Pages Deployment
 

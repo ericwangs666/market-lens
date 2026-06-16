@@ -15,12 +15,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Generate latest data
-        shell: pwsh
-        run: ./scripts/generate-daily-data.ps1
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+        run: python scripts/fetch-market-data.py
 
       - name: Commit generated data
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Update daily market data"
-          file_pattern: data.js daily/*.json market-site/data.js market-site/daily/*.json
+          file_pattern: data.js daily/*.json realtime/*.json market-site/data.js market-site/daily/*.json market-site/realtime/*.json

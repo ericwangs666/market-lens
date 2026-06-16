@@ -21,9 +21,6 @@ jobs:
           python-version: "3.12"
 
       - name: Generate latest data
-        env:
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
         run: python scripts/fetch-market-data.py
 
       - name: Commit generated data

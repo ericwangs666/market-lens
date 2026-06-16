@@ -90,6 +90,23 @@ p {
 .status-card strong { font-size: 22px; }
 .status-card small { color: var(--muted); }
 
+.manual-update {
+  width: fit-content;
+  margin-top: 12px;
+  border: 1px solid rgba(25, 72, 123, 0.28);
+  border-radius: 6px;
+  background: var(--blue);
+  color: #fff;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.manual-update:hover {
+  background: #123f6c;
+}
+
 .tabs {
   display: flex;
   gap: 8px;

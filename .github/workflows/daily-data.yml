@@ -21,6 +21,9 @@ jobs:
           python-version: "3.12"
 
       - name: Generate latest data
+        env:
+          KPL_SECTOR_STRENGTH_URL: ${{ secrets.KPL_SECTOR_STRENGTH_URL }}
+          KPL_COOKIE: ${{ secrets.KPL_COOKIE }}
         run: python scripts/fetch-market-data.py
 
       - name: Commit generated data

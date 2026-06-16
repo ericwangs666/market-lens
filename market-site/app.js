@@ -69,7 +69,17 @@ function renderProviderStatus() {
   const messages = [];
   const cnStatus = String(status.cn || "");
   const usStatus = String(status.us || "");
+  const sectorStatus = String(status.cnSectors || "");
   messages.push(cnStatus.includes("seed") || cnStatus.includes("no usable") ? "A股：备用数据" : "A股：已更新");
+  messages.push(
+    sectorStatus.includes("KPL")
+      ? "板块：开盘啦"
+      : sectorStatus.includes("Local")
+        ? "板块：观察池"
+        : sectorStatus
+          ? "板块：公开排行"
+          : "板块：备用"
+  );
   messages.push(usStatus.includes("missing") || usStatus.includes("seed") ? "美股：备用数据" : "美股：已更新");
   providerStatus.innerHTML = messages.map((message) => `<span>${message}</span>`).join("");
 }
@@ -116,6 +126,9 @@ async function triggerManualUpdate() {
 }
 
 function sectorStocks(market, sector) {
+  if (Array.isArray(sector.stocks) && sector.stocks.length) {
+    return sector.stocks;
+  }
   const name = String(sector.name || "").toLowerCase();
   return market.stocks
     .filter((stock) => {
@@ -140,7 +153,7 @@ function sectorCard(market, sector) {
           <div class="sector-stock">
             <span>
               <strong title="${stock.name}">${stock.name}</strong>
-              <small>${stock.code} · ${stock.type}</small>
+              <small>${stock.code}${stock.type ? ` · ${stock.type}` : ""}</small>
             </span>
             <em class="${stock.pct >= 0 ? "up" : "down"}">${fmtPct(stock.pct)}</em>
           </div>

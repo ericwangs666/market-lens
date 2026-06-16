@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sys
 import time
@@ -24,6 +25,7 @@ SITE_REALTIME_DIR = SITE_DIR / "realtime"
 
 SINA_CN_DAILY_URL = "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData"
 SINA_US_DAILY_URL = "https://stock.finance.sina.com.cn/usstock/api/jsonp.php/var%20_{symbol}=/US_MinKService.getDailyK"
+EASTMONEY_BOARD_URL = "https://push2.eastmoney.com/api/qt/clist/get"
 
 CN_INDEX_CODES = {
     "上证指数": "sh000001",
@@ -55,11 +57,13 @@ def compact_warning(status, key, message):
         warnings.append(message)
 
 
-def request_text(url, referer, retries=3):
+def request_text(url, referer, retries=3, extra_headers=None):
     headers = {
         "User-Agent": "Mozilla/5.0 market-lens/1.0",
         "Referer": referer,
     }
+    if extra_headers:
+        headers.update(extra_headers)
     last_error = None
     for attempt in range(retries):
         try:
@@ -71,6 +75,10 @@ def request_text(url, referer, retries=3):
             if attempt < retries - 1:
                 time.sleep(1.2 * (attempt + 1))
     raise last_error
+
+
+def request_json(url, referer, retries=3, extra_headers=None):
+    return json.loads(request_text(url, referer, retries, extra_headers))
 
 
 def cn_symbol(code):
@@ -126,6 +134,203 @@ def fetch_sina_us_daily(symbol):
     url = SINA_US_DAILY_URL.format(symbol=symbol) + "?" + urllib.parse.urlencode({"symbol": symbol})
     text = request_text(url, "https://finance.sina.com.cn/")
     return parse_sina_us_jsonp(text)
+
+
+def find_first_list(value):
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        for key in ("data", "list", "List", "items", "Items", "diff", "plates", "sectors"):
+            found = find_first_list(value.get(key))
+            if found:
+                return found
+        for child in value.values():
+            found = find_first_list(child)
+            if found:
+                return found
+    return []
+
+
+def number_from_keys(row, keys):
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, "", "-"):
+            try:
+                return round(float(value), 2)
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
+def text_from_keys(row, keys):
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, "", "-"):
+            return str(value)
+    return ""
+
+
+def normalize_sector_stock(name, code, pct=None, type_name="领涨股"):
+    if not name:
+        return None
+    stock = {
+        "name": str(name),
+        "code": str(code or ""),
+        "type": type_name,
+    }
+    if pct not in (None, "", "-"):
+        try:
+            stock["pct"] = round(float(pct), 2)
+        except (TypeError, ValueError):
+            pass
+    return stock
+
+
+def fetch_kpl_sectors(status):
+    url = os.environ.get("KPL_SECTOR_STRENGTH_URL", "").strip()
+    if not url:
+        status["cnSectors"] = "KPL sector source not configured; using public fallback"
+        return []
+
+    headers = {}
+    cookie = os.environ.get("KPL_COOKIE", "").strip()
+    if cookie:
+        headers["Cookie"] = cookie
+
+    try:
+        payload = request_json(url, "https://www.kaipanla.com/", extra_headers=headers)
+        rows = find_first_list(payload)
+    except Exception as exc:
+        compact_warning(status, "cnSectorWarnings", f"KPL sector source unavailable: {exc}")
+        return []
+
+    sectors = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = text_from_keys(row, ("name", "Name", "plate_name", "PlateName", "sector_name", "SectorName", "title"))
+        if not name:
+            continue
+        pct = number_from_keys(row, ("pct", "Pct", "change", "Change", "change_pct", "ChangePct", "zf", "ZhangFu", "strength", "Strength"))
+        leader = normalize_sector_stock(
+            text_from_keys(row, ("leader", "Leader", "stock_name", "StockName", "lead_stock_name")),
+            text_from_keys(row, ("leader_code", "LeaderCode", "stock_code", "StockCode", "lead_stock_code")),
+            number_from_keys(row, ("leader_pct", "LeaderPct", "stock_pct", "StockPct")),
+        )
+        sector = {
+            "name": name,
+            "pct": pct,
+            "status": "开盘啦板块强度",
+            "source": "开盘啦",
+        }
+        if leader:
+            sector["stocks"] = [leader]
+        sectors.append(sector)
+
+    sectors.sort(key=lambda item: item.get("pct", 0), reverse=True)
+    if sectors:
+        status["cnSectors"] = f"KPL sector strength updated {len(sectors[:8])} sectors"
+    return sectors[:8]
+
+
+def fetch_eastmoney_board_rows(fs, limit=20):
+    url = f"{EASTMONEY_BOARD_URL}?{urllib.parse.urlencode({
+        'pn': '1',
+        'pz': str(limit),
+        'po': '1',
+        'np': '1',
+        'fltt': '2',
+        'invt': '2',
+        'fid': 'f3',
+        'fs': fs,
+        'fields': 'f3,f12,f14,f62,f128,f136,f140,f207,f208',
+    })}"
+    payload = request_json(url, "https://quote.eastmoney.com/")
+    return ((payload.get("data") or {}).get("diff") or [])
+
+
+def fetch_public_sector_strength(status):
+    sectors = []
+    try:
+        rows = fetch_eastmoney_board_rows("m:90+t:2", 12) + fetch_eastmoney_board_rows("m:90+t:3", 12)
+    except Exception as exc:
+        compact_warning(status, "cnSectorWarnings", f"Public sector fallback unavailable: {exc}")
+        return []
+
+    seen = set()
+    for row in rows:
+        name = row.get("f14")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        stocks = []
+        first = normalize_sector_stock(row.get("f128"), row.get("f140"), row.get("f136"), "领涨股")
+        second = normalize_sector_stock(row.get("f207"), row.get("f208"), None, "活跃股")
+        for item in (first, second):
+            if item and item.get("code") not in {stock.get("code") for stock in stocks}:
+                stocks.append(item)
+        sectors.append({
+            "name": name,
+            "pct": number_from_keys(row, ("f3",)),
+            "status": "公开板块涨幅排行",
+            "source": "东方财富板块排行",
+            "code": row.get("f12"),
+            "moneyFlow": row.get("f62"),
+            "stocks": stocks,
+        })
+
+    sectors.sort(key=lambda item: item.get("pct", 0), reverse=True)
+    if sectors:
+        status["cnSectors"] = f"Public sector strength updated {len(sectors[:8])} sectors"
+    return sectors[:8]
+
+
+def build_stock_sector_strength(market_data, status):
+    groups = {}
+    for stock in market_data["markets"]["cn"].get("stocks", []):
+        sector = stock.get("sector") or "观察池"
+        groups.setdefault(sector, []).append(stock)
+
+    sectors = []
+    for name, stocks in groups.items():
+        ranked = sorted(
+            stocks,
+            key=lambda item: item.get("pct") if item.get("pct") is not None else -999,
+            reverse=True,
+        )
+        pct_values = [stock.get("pct") for stock in ranked if stock.get("pct") is not None]
+        strength = round(sum(pct_values) / len(pct_values), 2) if pct_values else 0
+        sectors.append({
+            "name": name,
+            "pct": strength,
+            "status": "观察池涨幅计算",
+            "source": "本地观察池",
+            "stocks": [
+                {
+                    "name": stock.get("name"),
+                    "code": stock.get("code"),
+                    "pct": stock.get("pct"),
+                    "type": stock.get("type"),
+                }
+                for stock in ranked[:4]
+            ],
+        })
+
+    sectors.sort(key=lambda item: item.get("pct", 0), reverse=True)
+    if sectors:
+        status["cnSectors"] = "Local watchlist sector strength fallback"
+    return sectors[:8]
+
+
+def apply_cn_sector_strength(market_data, status):
+    cn = market_data["markets"]["cn"]
+    sectors = fetch_kpl_sectors(status)
+    if not sectors:
+        sectors = fetch_public_sector_strength(status)
+    if not sectors:
+        sectors = build_stock_sector_strength(market_data, status)
+    if sectors:
+        cn["sectors"] = sectors
 
 
 def update_quote_from_closes(target, closes, latest_date, provider_name):
@@ -303,6 +508,7 @@ def main():
 
     provider_status = market_data["providerStatus"]
     apply_sina_cn(market_data, provider_status)
+    apply_cn_sector_strength(market_data, provider_status)
     apply_sina_us(market_data, provider_status)
     write_outputs(market_data)
 

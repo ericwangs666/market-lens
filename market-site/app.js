@@ -21,8 +21,17 @@ const MEMO_KEY = "market-lens-memos";
 const UPDATE_TOKEN_KEY = "market-lens-github-token";
 const WORKFLOW_DISPATCH_URL = "https://api.github.com/repos/ericwangs666/market-lens/actions/workflows/daily-data.yml/dispatches";
 const UPDATE_BACKEND_ENDPOINT = (window.MARKET_LENS_UPDATE_ENDPOINT || "").trim();
+const BACKEND_UNAVAILABLE_MESSAGE = window.MarketLensApi?.unavailableMessage || "后端服务暂不可用";
 let historyIndex = null;
 let selectedHistoryDate = null;
+let userData = {
+  watchlist: [],
+  memos: [],
+  alertRules: [],
+  backendAvailable: true,
+  loaded: false,
+};
+let backendDailyReview = undefined;
 
 document.getElementById("runTime").textContent = data.lastRun;
 renderProviderStatus();
@@ -56,6 +65,29 @@ searchInput.addEventListener("input", () => renderMarket());
 function fmtPct(value) {
   if (value === null || value === undefined) return "--";
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function normalizeSearch(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s._\-\/\\()（）【】[\]{}]+/g, "");
+}
+
+function fuzzyMatch(text, keyword) {
+  const haystack = normalizeSearch(text);
+  const needle = normalizeSearch(keyword);
+  if (!needle) return true;
+  if (!haystack) return false;
+  if (haystack.includes(needle)) return true;
+
+  let cursor = 0;
+  for (const char of needle) {
+    cursor = haystack.indexOf(char, cursor);
+    if (cursor === -1) return false;
+    cursor += 1;
+  }
+  return true;
 }
 
 function setManualUpdateStatus(message, isError = false) {
@@ -164,7 +196,7 @@ function sectorStocks(market, sector) {
     .filter((stock) => {
       const sectorName = String(stock.sector || "").toLowerCase();
       const text = `${stock.name || ""} ${stock.code || ""} ${stock.sector || ""} ${stock.type || ""} ${stock.reason || ""}`.toLowerCase();
-      return sectorName === name || sectorName.includes(name) || name.includes(sectorName) || text.includes(name);
+      return sectorName === name || fuzzyMatch(sectorName, name) || fuzzyMatch(name, sectorName) || fuzzyMatch(text, name);
     })
     .sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
 }
@@ -210,10 +242,10 @@ function renderMarket() {
   const market = data.markets[currentMarket];
   if (!market) return;
 
-  const keyword = searchInput.value.trim().toLowerCase();
+  const keyword = searchInput.value.trim();
   const stocks = market.stocks.filter((stock) => {
-    const text = `${stock.name} ${stock.code} ${stock.sector} ${stock.type}`.toLowerCase();
-    if (keyword && !text.includes(keyword)) return false;
+    const text = `${stock.name} ${stock.code} ${stock.sector} ${stock.type} ${stock.reason || ""}`;
+    if (!fuzzyMatch(text, keyword)) return false;
     if (currentFilter === "leaders" && !stock.type.includes("龙头") && !stock.type.includes("权重")) return false;
     if (currentFilter === "hot" && !["钼", "铜", "半导体", "券商概念", "AI基础设施"].some((tag) => stock.sector.includes(tag))) return false;
     return true;
@@ -424,8 +456,31 @@ function compareMarket(report, marketName) {
   `;
 }
 
-function renderResearch() {
+async function renderResearch() {
+  const review = await loadBackendDailyReview();
+  const reviewPanel = review
+    ? `
+    <section class="panel">
+      <h2>Backend Daily Review</h2>
+      <p><strong>${review.title || "Latest review"}</strong></p>
+      <p>${review.reviewDate || ""} ${review.source ? `- ${review.source}` : ""}</p>
+      <div class="trend-row">
+        ${(review.leadingStocks || []).slice(0, 5).map((item) => `<span>${item}</span>`).join("") || "<span>No leading stocks</span>"}
+      </div>
+      <div class="research-card">
+        ${(review.highlights || []).map((item) => `<p>${item}</p>`).join("") || "<p>No highlights returned by backend yet.</p>"}
+      </div>
+    </section>
+  `
+    : `
+    <section class="panel">
+      <h2>Backend Daily Review</h2>
+      <p>${BACKEND_UNAVAILABLE_MESSAGE}. Static market data is still available on this page.</p>
+    </section>
+  `;
+
   researchView.innerHTML = `
+    ${reviewPanel}
     <section class="panel">
       <h2>机构公开观点入口</h2>
       <p>高盛、大摩的完整研究报告多数需要机构账号；这里先接入公开 Insights 页面和可公开查看的专题入口。</p>
@@ -452,7 +507,7 @@ function allStocks() {
   })));
 }
 
-function loadMemos() {
+function loadLocalMemos() {
   try {
     return JSON.parse(localStorage.getItem(MEMO_KEY) || "[]");
   } catch {
@@ -460,33 +515,147 @@ function loadMemos() {
   }
 }
 
-function saveMemos(memos) {
+function saveLocalMemos(memos) {
   localStorage.setItem(MEMO_KEY, JSON.stringify(memos));
 }
 
-function findQuote(code) {
-  const normalized = code.trim().toLowerCase();
-  return allStocks().find((stock) => stock.code.toLowerCase() === normalized || stock.name.toLowerCase() === normalized);
+function memoToWatchItem(memo) {
+  const quote = findQuote(memo.code);
+  return {
+    code: memo.code,
+    name: memo.name,
+    market: quote?.market || memo.market || "",
+    createdAt: memo.createdAt || new Date().toISOString(),
+  };
 }
 
-function renderWatchlist() {
-  const memos = loadMemos();
-  const triggered = memos.map((memo) => ({ memo, quote: findQuote(memo.code) }))
-    .filter((item) => item.quote && item.quote.pct >= item.memo.threshold);
+function memoToAlertRule(memo) {
+  return {
+    code: memo.code,
+    name: memo.name,
+    metric: "pct",
+    operator: ">=",
+    threshold: Number(memo.threshold),
+    enabled: true,
+    createdAt: memo.createdAt || new Date().toISOString(),
+  };
+}
 
-  alertList.innerHTML = triggered.length ? triggered.map(({ memo, quote }) => `
+function fallbackUserData() {
+  const memos = loadLocalMemos();
+  return {
+    watchlist: memos.map(memoToWatchItem),
+    memos,
+    alertRules: memos.map(memoToAlertRule),
+    backendAvailable: false,
+    loaded: true,
+  };
+}
+
+async function loadBackendDailyReview() {
+  if (backendDailyReview !== undefined) return backendDailyReview;
+  if (!window.MarketLensApi?.getDailyReview) {
+    backendDailyReview = null;
+    return backendDailyReview;
+  }
+
+  try {
+    backendDailyReview = await window.MarketLensApi.getDailyReview();
+  } catch (error) {
+    backendDailyReview = null;
+  }
+  return backendDailyReview;
+}
+
+async function loadUserData() {
+  if (userData.loaded) return userData;
+  if (!window.MarketLensApi) {
+    userData = fallbackUserData();
+    return userData;
+  }
+
+  try {
+    const [watchlist, memos, alertRules] = await Promise.all([
+      window.MarketLensApi.getWatchlist(),
+      window.MarketLensApi.getMemos(),
+      window.MarketLensApi.getAlertRules(),
+    ]);
+    userData = {
+      watchlist,
+      memos,
+      alertRules,
+      backendAvailable: true,
+      loaded: true,
+    };
+  } catch (error) {
+    userData = fallbackUserData();
+  }
+  return userData;
+}
+
+async function saveUserData(nextUserData) {
+  saveLocalMemos(nextUserData.memos);
+  if (!window.MarketLensApi) {
+    userData = { ...nextUserData, backendAvailable: false, loaded: true };
+    return userData;
+  }
+
+  try {
+    const [watchlist, memos, alertRules] = await Promise.all([
+      window.MarketLensApi.saveWatchlist(nextUserData.watchlist),
+      window.MarketLensApi.saveMemos(nextUserData.memos),
+      window.MarketLensApi.saveAlertRules(nextUserData.alertRules),
+    ]);
+    userData = {
+      watchlist,
+      memos,
+      alertRules,
+      backendAvailable: true,
+      loaded: true,
+    };
+  } catch (error) {
+    userData = { ...nextUserData, backendAvailable: false, loaded: true };
+  }
+  return userData;
+}
+
+function findQuote(code) {
+  const normalized = normalizeSearch(code);
+  return allStocks().find((stock) => {
+    const stockCode = normalizeSearch(stock.code);
+    const stockName = normalizeSearch(stock.name);
+    return stockCode === normalized || stockName === normalized || fuzzyMatch(`${stock.name} ${stock.code} ${stock.sector}`, code);
+  });
+}
+
+async function renderWatchlist() {
+  alertList.innerHTML = `<div class="empty-state">正在读取自选提醒...</div>`;
+  memoList.innerHTML = "";
+  const currentUserData = await loadUserData();
+  const memos = currentUserData.memos;
+  const triggered = currentUserData.alertRules
+    .filter((rule) => rule.enabled !== false)
+    .map((rule) => {
+      const memo = memos.find((item) => normalizeSearch(item.code) === normalizeSearch(rule.code)) || rule;
+      return { memo, rule, quote: findQuote(rule.code) };
+    })
+    .filter((item) => item.quote && item.quote.pct >= Number(item.rule.threshold));
+  const backendNotice = currentUserData.backendAvailable ? "" : `<div class="empty-state">${BACKEND_UNAVAILABLE_MESSAGE}，已使用本地 mock 数据。</div>`;
+
+  alertList.innerHTML = backendNotice + (triggered.length ? triggered.map(({ memo, rule, quote }) => `
     <article class="alert-card">
       <header>
-        <h3>${memo.name} <small>${memo.code}</small></h3>
+        <h3>${memo.name || rule.name} <small>${memo.code || rule.code}</small></h3>
         <strong class="up">${fmtPct(quote.pct)}</strong>
       </header>
-      <p>已超过你设置的 ${fmtPct(memo.threshold)} 提醒阈值。</p>
+      <p>已超过你设置的 ${fmtPct(Number(rule.threshold))} 提醒阈值。</p>
       <p>${memo.note || "暂无备忘录。"}</p>
     </article>
-  `).join("") : `<div class="empty-state">当前没有触发提醒。添加备忘录后，页面会按最新行情数据判断是否触发。</div>`;
+  `).join("") : `<div class="empty-state">当前没有触发提醒。添加备忘录后，页面会按最新行情数据判断是否触发。</div>`);
 
   memoList.innerHTML = memos.length ? memos.map((memo, index) => {
     const quote = findQuote(memo.code);
+    const rule = currentUserData.alertRules.find((item) => normalizeSearch(item.code) === normalizeSearch(memo.code));
     return `
       <article class="memo-card">
         <header>
@@ -497,7 +666,7 @@ function renderWatchlist() {
           <button data-delete-memo="${index}">删除</button>
         </header>
         <div class="trend-row">
-          <span>阈值 ${fmtPct(memo.threshold)}</span>
+          <span>阈值 ${fmtPct(Number(rule?.threshold ?? memo.threshold))}</span>
           <span>今日 ${quote ? fmtPct(quote.pct) : "无行情"}</span>
           <span>${quote ? quote.market : "待接入"}</span>
         </div>
@@ -506,16 +675,24 @@ function renderWatchlist() {
   }).join("") : `<div class="empty-state">还没有备忘录。可以先添加一只股票和提醒阈值。</div>`;
 
   document.querySelectorAll("[data-delete-memo]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const next = loadMemos();
-      next.splice(Number(button.dataset.deleteMemo), 1);
-      saveMemos(next);
+    button.addEventListener("click", async () => {
+      const nextMemos = [...userData.memos];
+      const removed = nextMemos.splice(Number(button.dataset.deleteMemo), 1)[0];
+      const code = normalizeSearch(removed?.code);
+      const stillUsed = nextMemos.some((memo) => normalizeSearch(memo.code) === code);
+      const nextUserData = {
+        ...userData,
+        memos: nextMemos,
+        watchlist: stillUsed ? userData.watchlist : userData.watchlist.filter((item) => normalizeSearch(item.code) !== code),
+        alertRules: userData.alertRules.filter((item) => stillUsed || normalizeSearch(item.code) !== code),
+      };
+      await saveUserData(nextUserData);
       renderWatchlist();
     });
   });
 }
 
-memoForm.addEventListener("submit", (event) => {
+memoForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const memo = {
     code: document.getElementById("memoCode").value.trim(),
@@ -524,9 +701,24 @@ memoForm.addEventListener("submit", (event) => {
     note: document.getElementById("memoNote").value.trim(),
     createdAt: new Date().toISOString()
   };
-  const memos = loadMemos();
+  await loadUserData();
+  const memos = [...userData.memos];
   memos.unshift(memo);
-  saveMemos(memos);
+  const normalizedCode = normalizeSearch(memo.code);
+  const watchlist = [
+    memoToWatchItem(memo),
+    ...userData.watchlist.filter((item) => normalizeSearch(item.code) !== normalizedCode),
+  ];
+  const alertRules = [
+    memoToAlertRule(memo),
+    ...userData.alertRules.filter((item) => normalizeSearch(item.code) !== normalizedCode),
+  ];
+  await saveUserData({
+    ...userData,
+    watchlist,
+    memos,
+    alertRules,
+  });
   memoForm.reset();
   document.getElementById("memoThreshold").value = "5";
   renderWatchlist();

@@ -1,3 +1,9 @@
+.idea/
+.env
+.env.*
+application-local.yml
+dist/
+target/
 tools/
 repo-git/
 .ssh/

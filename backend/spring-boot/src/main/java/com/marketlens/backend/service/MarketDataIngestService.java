@@ -24,6 +24,7 @@ import java.util.Objects;
 public class MarketDataIngestService {
     private static final long DEFAULT_USER_ID = 1L;
     private static final List<String> DEFAULT_A_SYMBOLS = List.of("600000", "000001");
+    private static final List<String> DEFAULT_US_SYMBOLS = List.of("NVDA", "MSFT");
 
     private final MarketDataProviderFactory providerFactory;
     private final MarketDataProperties properties;
@@ -151,9 +152,7 @@ public class MarketDataIngestService {
     }
 
     private List<String> resolveSymbols(String market) {
-        if (!"A".equals(market)) {
-            return DEFAULT_A_SYMBOLS;
-        }
+        List<String> defaults = "US".equals(market) ? DEFAULT_US_SYMBOLS : DEFAULT_A_SYMBOLS;
         List<Long> stockIds = watchlistMapper.selectList(new LambdaQueryWrapper<Watchlist>()
                         .eq(Watchlist::getUserId, DEFAULT_USER_ID))
                 .stream()
@@ -161,15 +160,21 @@ public class MarketDataIngestService {
                 .filter(Objects::nonNull)
                 .toList();
         if (stockIds.isEmpty()) {
-            return DEFAULT_A_SYMBOLS;
+            return defaults;
         }
         List<String> symbols = stockMapper.selectBatchIds(stockIds).stream()
-                .filter(stock -> "A".equalsIgnoreCase(stock.getMarket())
-                        || "CN".equalsIgnoreCase(stock.getMarket()))
+                .filter(stock -> matchesMarket(market, stock.getMarket()))
                 .map(Stock::getSymbol)
                 .distinct()
                 .toList();
-        return symbols.isEmpty() ? DEFAULT_A_SYMBOLS : symbols;
+        return symbols.isEmpty() ? defaults : symbols;
+    }
+
+    private boolean matchesMarket(String requestedMarket, String stockMarket) {
+        if ("A".equals(requestedMarket)) {
+            return "A".equalsIgnoreCase(stockMarket) || "CN".equalsIgnoreCase(stockMarket);
+        }
+        return requestedMarket.equalsIgnoreCase(stockMarket);
     }
 
     private DailyQuoteData toData(DailyQuote quote) {

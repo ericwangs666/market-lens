@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: market-lens-api
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: SERVER_PORT
+        value: "10000"
+      - key: FLYWAY_ENABLED
+        value: "true"
+      - key: DB_INIT_FAIL_TIMEOUT
+        value: "1"
+      - key: ALERT_SCHEDULER_ENABLED
+        value: "false"
+      - key: MARKET_DATA_USE_MOCK
+        value: "false"
+      - key: MARKET_DATA_FALLBACK_TO_MOCK
+        value: "true"
+      - key: MARKET_DATA_PROVIDER_A
+        value: AKSHARE
+      - key: AKSHARE_PYTHON_COMMAND
+        value: python3
+      - key: AKSHARE_WORKER_PATH
+        value: /app/data-worker/fetch_a_daily_quotes.py
+      - key: JAVA_TOOL_OPTIONS
+        value: -XX:MaxRAMPercentage=70.0

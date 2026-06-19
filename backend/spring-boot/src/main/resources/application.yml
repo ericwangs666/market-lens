@@ -31,6 +31,7 @@ mybatis-plus:
     banner: false
 
 market-lens:
+  admin-token: ${ADMIN_TOKEN:}
   alerts:
     scheduler-enabled: ${ALERT_SCHEDULER_ENABLED:false}
     fixed-delay-ms: ${ALERT_SCHEDULER_FIXED_DELAY_MS:60000}

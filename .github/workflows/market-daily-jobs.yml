@@ -1,0 +1,55 @@
+name: Run Market Lens Daily Jobs
+
+on:
+  schedule:
+    # 15:30 Asia/Shanghai, Monday-Friday.
+    - cron: "30 7 * * 1-5"
+    # 22:30 UTC is after the US regular close in both EDT and EST.
+    - cron: "30 22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      market:
+        description: Market job to run
+        required: true
+        default: A
+        type: choice
+        options:
+          - A
+          - US
+
+jobs:
+  run-a-share-job:
+    if: github.event.schedule == '30 7 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.market == 'A')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger A-share daily job
+        env:
+          BACKEND_URL: ${{ secrets.MARKET_LENS_BACKEND_URL }}
+          ADMIN_TOKEN: ${{ secrets.MARKET_LENS_ADMIN_TOKEN }}
+        run: |
+          test -n "$BACKEND_URL"
+          test -n "$ADMIN_TOKEN"
+          curl --fail-with-body --show-error --silent \
+            --retry 3 --retry-delay 20 --retry-all-errors \
+            --max-time 180 \
+            -X POST \
+            -H "X-Admin-Token: $ADMIN_TOKEN" \
+            "${BACKEND_URL%/}/api/admin/market-daily-job/run?market=A"
+
+  run-us-job:
+    if: github.event.schedule == '30 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.market == 'US')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger US daily job
+        env:
+          BACKEND_URL: ${{ secrets.MARKET_LENS_BACKEND_URL }}
+          ADMIN_TOKEN: ${{ secrets.MARKET_LENS_ADMIN_TOKEN }}
+        run: |
+          test -n "$BACKEND_URL"
+          test -n "$ADMIN_TOKEN"
+          curl --fail-with-body --show-error --silent \
+            --retry 3 --retry-delay 20 --retry-all-errors \
+            --max-time 180 \
+            -X POST \
+            -H "X-Admin-Token: $ADMIN_TOKEN" \
+            "${BACKEND_URL%/}/api/admin/market-daily-job/run?market=US"

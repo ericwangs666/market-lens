@@ -180,6 +180,124 @@ AKShare public data is mainly appropriate for personal research and MVP
 validation. A commercial deployment should move to a formally licensed market
 data provider.
 
+## Personal Free Deployment
+
+The personal deployment uses four services:
+
+```text
+GitHub Pages     static frontend
+Render Free      Spring Boot + Python AKShare worker
+Neon Free        PostgreSQL
+GitHub Actions   after-close A-share and US job triggers
+```
+
+### 1. Create Neon PostgreSQL
+
+Create a free Neon project and copy its PostgreSQL connection string. Keep the
+connection string private. It typically looks like:
+
+```text
+postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require
+```
+
+Do not add it to this repository.
+
+### 2. Deploy The Backend To Render
+
+The repository includes `render.yaml`, a root `Dockerfile`, and
+`deploy/render-start.sh`. Create a Render Blueprint from this repository.
+
+Set these secret environment variables in Render:
+
+```text
+DATABASE_URL=<Neon connection string>
+ADMIN_TOKEN=<a long random private value>
+```
+
+The Blueprint supplies the non-secret settings, including:
+
+```text
+SERVER_PORT=10000
+FLYWAY_ENABLED=true
+MARKET_DATA_PROVIDER_A=AKSHARE
+AKSHARE_PYTHON_COMMAND=python3
+AKSHARE_WORKER_PATH=/app/data-worker/fetch_a_daily_quotes.py
+```
+
+Render starts the application and Flyway creates or upgrades the Neon schema.
+Verify:
+
+```powershell
+curl https://market-lens-api.onrender.com/api/health
+```
+
+The free Render web service sleeps after inactivity and can take about one
+minute to wake. The scheduled GitHub Actions requests wake it before running
+the market job.
+
+### 3. Protect Admin APIs
+
+Every `/api/admin/**` request requires:
+
+```text
+X-Admin-Token: <ADMIN_TOKEN>
+```
+
+Example:
+
+```powershell
+curl -X POST `
+  -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  "https://market-lens-api.onrender.com/api/admin/market-daily-job/run?market=A"
+```
+
+Requests with a missing or incorrect token return HTTP 401. The admin token is
+read from the `ADMIN_TOKEN` environment variable and is never sent to the
+frontend.
+
+### 4. Configure GitHub Actions
+
+Add these repository Actions secrets:
+
+```text
+MARKET_LENS_BACKEND_URL=https://market-lens-api.onrender.com
+MARKET_LENS_ADMIN_TOKEN=<the same ADMIN_TOKEN configured in Render>
+```
+
+`.github/workflows/market-daily-jobs.yml` runs:
+
+- A-share job at 15:30 Asia/Shanghai, Monday-Friday
+- US job at 22:30 UTC, Monday-Friday, after the regular close in both US
+  daylight-saving and standard time
+
+The workflow can also be started manually and lets you choose `A` or `US`.
+It calls:
+
+```text
+POST /api/admin/market-daily-job/run?market=A
+POST /api/admin/market-daily-job/run?market=US
+```
+
+The backend derives the trade date in the appropriate market timezone when
+`tradeDate` is omitted.
+
+### 5. Deploy The Frontend To GitHub Pages
+
+The existing `.github/workflows/pages.yml` continues to publish
+`market-site/` from `main`. The public backend base URL is configured in:
+
+```text
+config.js
+market-site/config.js
+```
+
+The backend URL is not a secret. Database credentials, the admin token, and API
+keys must never appear in either frontend file.
+
+GitHub Pages is publicly reachable even when the project is intended only for
+personal use. This setup protects write/admin operations with the private admin
+token, but it does not add login protection to the static page.
+
 ## Local PostgreSQL
 
 This repository does not currently include a `docker-compose.yml`, so the quickest local startup path is a standalone container:
@@ -396,13 +514,15 @@ curl http://localhost:8080/api/market/daily-review
 Check the configured provider:
 
 ```powershell
-curl http://localhost:8080/api/admin/market-data/providers
+curl -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  http://localhost:8080/api/admin/market-data/providers
 ```
 
 Test AKShare without writing to PostgreSQL:
 
 ```powershell
-curl -X POST "http://localhost:8080/api/admin/market-data/test?market=A"
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  "http://localhost:8080/api/admin/market-data/test?market=A"
 ```
 
 The test endpoint checks today first and then searches backward up to seven
@@ -411,13 +531,15 @@ days for the most recent available trading day.
 Ingest A-share quotes:
 
 ```powershell
-curl -X POST "http://localhost:8080/api/admin/market-data/ingest?market=A&tradeDate=2026-06-19"
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  "http://localhost:8080/api/admin/market-data/ingest?market=A&tradeDate=2026-06-19"
 ```
 
 Run the complete A-share daily job:
 
 ```powershell
-curl -X POST "http://localhost:8080/api/admin/market-daily-job/run?market=A&tradeDate=2026-06-19"
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  "http://localhost:8080/api/admin/market-daily-job/run?market=A&tradeDate=2026-06-19"
 ```
 
 Query the stored quotes:
@@ -435,7 +557,8 @@ review, and records the outcome in `job_run_logs`.
 Generate mock data first:
 
 ```powershell
-curl -X POST http://localhost:8080/api/admin/market-review/generate
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  http://localhost:8080/api/admin/market-review/generate
 ```
 
 Create a rule matching the mock quote:
@@ -449,7 +572,8 @@ curl -X POST http://localhost:8080/api/alerts/rules `
 Run the alert engine:
 
 ```powershell
-curl -X POST http://localhost:8080/api/admin/alerts/check
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  http://localhost:8080/api/admin/alerts/check
 ```
 
 Then verify:
@@ -474,7 +598,8 @@ Run the alert check twice on the same day to verify `oncePerDay=true` prevents d
 ### 7. Verify Daily Review Generation
 
 ```powershell
-curl -X POST http://localhost:8080/api/admin/market-review/generate
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  http://localhost:8080/api/admin/market-review/generate
 curl http://localhost:8080/api/market/daily-review
 ```
 

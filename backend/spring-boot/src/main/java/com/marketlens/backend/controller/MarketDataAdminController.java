@@ -10,7 +10,6 @@ import com.marketlens.backend.marketdata.dto.MarketDataIngestResult;
 import com.marketlens.backend.marketdata.dto.MarketDataProviderStatus;
 import com.marketlens.backend.service.MarketDailyJobService;
 import com.marketlens.backend.service.MarketDataIngestService;
-import org.springframework.context.annotation.Profile;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,9 +18,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 
-@Profile("dev")
 @RestController
 @RequestMapping("/api/admin")
 public class MarketDataAdminController {
@@ -79,16 +78,28 @@ public class MarketDataAdminController {
     @PostMapping("/market-data/ingest")
     public ApiResponse<MarketDataIngestResult> ingest(
             @RequestParam(defaultValue = "A") String market,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate
     ) {
-        return ApiResponse.success(ingestService.ingest(market, tradeDate));
+        return ApiResponse.success(ingestService.ingest(market, resolveTradeDate(market, tradeDate)));
     }
 
     @PostMapping("/market-daily-job/run")
     public ApiResponse<MarketDailyJobResult> run(
             @RequestParam(defaultValue = "A") String market,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate
     ) {
-        return ApiResponse.success(dailyJobService.run(market, tradeDate));
+        return ApiResponse.success(dailyJobService.run(market, resolveTradeDate(market, tradeDate)));
+    }
+
+    private LocalDate resolveTradeDate(String market, LocalDate tradeDate) {
+        if (tradeDate != null) {
+            return tradeDate;
+        }
+        ZoneId marketZone = "US".equalsIgnoreCase(market)
+                ? ZoneId.of("America/New_York")
+                : ZoneId.of("Asia/Shanghai");
+        return LocalDate.now(marketZone);
     }
 }

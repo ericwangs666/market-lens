@@ -1,0 +1,50 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: market-lens-backend
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/market_lens}
+    username: ${DB_USERNAME:market_lens}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      initialization-fail-timeout: ${DB_INIT_FAIL_TIMEOUT:0}
+
+  flyway:
+    enabled: ${FLYWAY_ENABLED:false}
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+market-lens:
+  admin-token: ${ADMIN_TOKEN:}
+  alerts:
+    scheduler-enabled: ${ALERT_SCHEDULER_ENABLED:false}
+    fixed-delay-ms: ${ALERT_SCHEDULER_FIXED_DELAY_MS:60000}
+    dedupe-ttl-hours: ${ALERT_DEDUPE_TTL_HOURS:24}
+  notifications:
+    telegram-enabled: ${TELEGRAM_ENABLED:false}
+    telegram-bot-token: ${TELEGRAM_BOT_TOKEN:}
+    telegram-chat-id: ${TELEGRAM_CHAT_ID:}
+
+market-data:
+  use-mock: ${MARKET_DATA_USE_MOCK:false}
+  fallback-to-mock: ${MARKET_DATA_FALLBACK_TO_MOCK:true}
+  provider-a: ${MARKET_DATA_PROVIDER_A:AKSHARE}
+  akshare:
+    python-command: ${AKSHARE_PYTHON_COMMAND:python}
+    worker-path: ${AKSHARE_WORKER_PATH:../data-worker/fetch_a_daily_quotes.py}

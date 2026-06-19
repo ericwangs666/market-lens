@@ -1,110 +1,713 @@
 # Market Lens
 
-Market Lens is a static market dashboard MVP for tracking A-share and US market sectors, leading stocks, recent stock trends, and public institutional research links.
+Market Lens is a market dashboard project with:
 
-## Local Preview
+- a static frontend in the repository root and `market-site/`
+- a Java Spring Boot backend in `backend/spring-boot/`
+- PostgreSQL persistence managed by Flyway
+- Redis-based alert dedupe
+- a Python AKShare worker in `data-worker/` for free A-share daily quotes
+- development-only admin test endpoints for mock data, alert checks, and daily review generation
+
+## Project Structure
+
+- Frontend entry: `index.html`
+- Published static copy: `market-site/index.html`
+- Frontend API wrapper: `src/api.js`
+- Backend entry class: `backend/spring-boot/src/main/java/com/marketlens/backend/MarketLensBackendApplication.java`
+- Backend config: `backend/spring-boot/src/main/resources/application.yml`
+- Flyway SQL: `backend/spring-boot/src/main/resources/db/migration/`
+- AKShare worker: `data-worker/fetch_a_daily_quotes.py`
+
+The existing static pages, mock market data, and local fallback behavior are still retained.
+
+## Frontend
+
+The root frontend is a static page and can be previewed directly or served locally:
+
+```powershell
+python -m http.server 5173
+```
 
 Open:
 
 ```text
-market-site/index.html
+http://localhost:5173/index.html
 ```
 
-## Daily Data Generation
-
-Daily market data is generated from AKShare and public delayed data sources, with seed data as a fallback:
+The frontend uses:
 
 ```text
-data/market-seed.json
+src/api.js
+config.js
+app.js
 ```
 
-GitHub Actions installs AKShare automatically before generating data:
+By default the frontend points to:
+
+```js
+window.MARKET_LENS_API_BASE = window.MARKET_LENS_API_BASE || "http://localhost:8080/api";
+```
+
+The root project also includes a minimal build command for acceptance verification:
+
+```powershell
+npm install
+npm run build
+```
+
+The build output goes to:
 
 ```text
-python -m pip install -U pip akshare
+dist/
 ```
 
-Run the API generator:
+## Spring Boot Backend
+
+The backend lives in:
 
 ```text
-python scripts/fetch-market-data.py
+backend/spring-boot/
 ```
 
-The script updates:
+Requirements:
 
 ```text
-data.js
-daily/latest.json
-daily/YYYY-MM-DD.json
-realtime/latest.json
-market-site/data.js
-market-site/daily/latest.json
-market-site/daily/YYYY-MM-DD.json
-market-site/realtime/latest.json
+Java 17
+PostgreSQL
+Redis
 ```
 
-If AKShare or a public data source is rate-limited, the script keeps the current seed data so the site can still publish.
+Database and Redis settings come from environment variables. No real API key, token, or database password should be committed.
 
-## Manual Update Backend
+Important variables:
 
-The site can trigger the daily update directly from the page. For security, do not put a GitHub token in frontend code.
+```text
+SERVER_PORT=8080
+DB_URL=jdbc:postgresql://localhost:5432/market_lens
+DB_USERNAME=market_lens
+DB_PASSWORD=<your-local-password>
+FLYWAY_ENABLED=true
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+SPRING_PROFILES_ACTIVE=dev
+MARKET_DATA_USE_MOCK=false
+MARKET_DATA_FALLBACK_TO_MOCK=true
+MARKET_DATA_PROVIDER_A=AKSHARE
+AKSHARE_PYTHON_COMMAND=python
+AKSHARE_WORKER_PATH=../../data-worker/fetch_a_daily_quotes.py
+```
 
-This repo includes a Cloudflare Worker backend at:
+Start the backend:
+
+```powershell
+cd backend/spring-boot
+$env:SPRING_PROFILES_ACTIVE="dev"
+$env:DB_URL="jdbc:postgresql://localhost:5432/market_lens"
+$env:DB_USERNAME="market_lens"
+$env:DB_PASSWORD="<your-local-password>"
+$env:FLYWAY_ENABLED="true"
+$env:ALERT_SCHEDULER_ENABLED="false"
+.\mvnw.cmd spring-boot:run
+```
+
+Health check:
+
+```text
+GET http://localhost:8080/api/health
+```
+
+Expected response:
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": "ok"
+}
+```
+
+## AKShare A-Share Data
+
+Market Lens currently uses AKShare as the preferred A-share provider because it
+is free, does not require a Tushare token, and is suitable for personal
+research and an MVP. The Java backend remains responsible for persistence,
+analysis, reviews, alerts, and APIs. Python only fetches quotes and prints JSON.
+
+Tushare remains a future optional provider design. It is not required for the
+current startup path. US quotes can continue to use mock data or a future Alpha
+Vantage provider.
+
+Install the Python dependencies:
+
+```powershell
+cd data-worker
+pip install -r requirements.txt
+```
+
+Test the worker independently:
+
+```powershell
+python fetch_a_daily_quotes.py `
+  --market A `
+  --tradeDate 2026-06-19 `
+  --symbols "600000,000001"
+```
+
+The worker prints a JSON array to standard output. It never connects to the
+database and contains no API key or database password.
+
+Provider configuration:
+
+```yaml
+market-data:
+  use-mock: false
+  fallback-to-mock: true
+  provider-a: AKSHARE
+  akshare:
+    python-command: ${AKSHARE_PYTHON_COMMAND:python}
+    worker-path: ${AKSHARE_WORKER_PATH:../data-worker/fetch_a_daily_quotes.py}
+```
+
+Use `MARKET_DATA_USE_MOCK=true` to force mock quotes. With mock disabled,
+`provider-a=AKSHARE` invokes the Python worker. If AKShare fails and
+`MARKET_DATA_FALLBACK_TO_MOCK=true`, the ingest continues with mock data and
+writes a `WARNING` row to `job_run_logs`. If fallback is disabled, the task
+fails and writes `FAILED`.
+
+AKShare public data is mainly appropriate for personal research and MVP
+validation. A commercial deployment should move to a formally licensed market
+data provider.
+
+## Personal Free Deployment
+
+The personal deployment uses four services:
+
+```text
+GitHub Pages     static frontend
+Render Free      Spring Boot + Python AKShare worker
+Neon Free        PostgreSQL
+GitHub Actions   after-close A-share and US job triggers
+```
+
+### 1. Create Neon PostgreSQL
+
+Create a free Neon project and copy its PostgreSQL connection string. Keep the
+connection string private. It typically looks like:
+
+```text
+postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require
+```
+
+Do not add it to this repository.
+
+### 2. Deploy The Backend To Render
+
+The repository includes `render.yaml`, a root `Dockerfile`, and
+`deploy/render-start.sh`. Create a Render Blueprint from this repository.
+
+Set these secret environment variables in Render:
+
+```text
+DATABASE_URL=<Neon connection string>
+ADMIN_TOKEN=<a long random private value>
+```
+
+The Blueprint supplies the non-secret settings, including:
+
+```text
+SERVER_PORT=10000
+FLYWAY_ENABLED=true
+MARKET_DATA_PROVIDER_A=AKSHARE
+AKSHARE_PYTHON_COMMAND=python3
+AKSHARE_WORKER_PATH=/app/data-worker/fetch_a_daily_quotes.py
+```
+
+Render starts the application and Flyway creates or upgrades the Neon schema.
+Verify:
+
+```powershell
+curl https://market-lens-api.onrender.com/api/health
+```
+
+The free Render web service sleeps after inactivity and can take about one
+minute to wake. The scheduled GitHub Actions requests wake it before running
+the market job.
+
+### 3. Protect Admin APIs
+
+Every `/api/admin/**` request requires:
+
+```text
+X-Admin-Token: <ADMIN_TOKEN>
+```
+
+Example:
+
+```powershell
+curl -X POST `
+  -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  "https://market-lens-api.onrender.com/api/admin/market-daily-job/run?market=A"
+```
+
+Requests with a missing or incorrect token return HTTP 401. The admin token is
+read from the `ADMIN_TOKEN` environment variable and is never sent to the
+frontend.
+
+### 4. Configure GitHub Actions
+
+Add these repository Actions secrets:
+
+```text
+MARKET_LENS_BACKEND_URL=https://market-lens-api.onrender.com
+MARKET_LENS_ADMIN_TOKEN=<the same ADMIN_TOKEN configured in Render>
+```
+
+`.github/workflows/market-daily-jobs.yml` runs:
+
+- A-share job at 15:30 Asia/Shanghai, Monday-Friday
+- US job at 22:30 UTC, Monday-Friday, after the regular close in both US
+  daylight-saving and standard time
+
+The workflow can also be started manually and lets you choose `A` or `US`.
+It calls:
+
+```text
+POST /api/admin/market-daily-job/run?market=A
+POST /api/admin/market-daily-job/run?market=US
+```
+
+The backend derives the trade date in the appropriate market timezone when
+`tradeDate` is omitted.
+
+### 5. Deploy The Frontend To GitHub Pages
+
+The existing `.github/workflows/pages.yml` continues to publish
+`market-site/` from `main`. The public backend base URL is configured in:
+
+```text
+config.js
+market-site/config.js
+```
+
+The backend URL is not a secret. Database credentials, the admin token, and API
+keys must never appear in either frontend file.
+
+GitHub Pages is publicly reachable even when the project is intended only for
+personal use. This setup protects write/admin operations with the private admin
+token, but it does not add login protection to the static page.
+
+## Local PostgreSQL
+
+This repository does not currently include a `docker-compose.yml`, so the quickest local startup path is a standalone container:
+
+```powershell
+$env:POSTGRES_PASSWORD="<your-local-password>"
+docker run --name market-lens-postgres `
+  -e POSTGRES_DB=market_lens `
+  -e POSTGRES_USER=market_lens `
+  -e POSTGRES_PASSWORD=$env:POSTGRES_PASSWORD `
+  -p 5432:5432 `
+  -d postgres:16
+```
+
+If it already exists:
+
+```powershell
+docker start market-lens-postgres
+```
+
+Redis example:
+
+```powershell
+docker run --name market-lens-redis -p 6379:6379 -d redis:7
+```
+
+## API Surface
+
+Core backend endpoints:
+
+```text
+GET    /api/health
+GET    /api/stocks/search?keyword=NVDA
+GET    /api/stocks/NVDA
+GET    /api/watchlist
+POST   /api/watchlist
+DELETE /api/watchlist/{id}
+GET    /api/notes
+GET    /api/notes/{symbol}
+POST   /api/notes
+PUT    /api/notes/{id}
+DELETE /api/notes/{id}
+GET    /api/alerts/rules
+POST   /api/alerts/rules
+PUT    /api/alerts/rules/{id}
+DELETE /api/alerts/rules/{id}
+GET    /api/alerts/events
+GET    /api/market/daily-review
+GET    /api/market/daily-quotes?market=A&tradeDate=2026-06-19
+```
+
+Development-only admin endpoints:
+
+```text
+POST /api/admin/alerts/check
+POST /api/admin/market-review/generate
+GET  /api/admin/market-data/providers
+POST /api/admin/market-data/test?market=A
+POST /api/admin/market-data/ingest?market=A&tradeDate=2026-06-19
+POST /api/admin/market-daily-job/run?market=A&tradeDate=2026-06-19
+```
+
+Legacy compatibility endpoints such as `/api/memos`, `/api/alert-rules`, and `/api/alert-history` are still present so older frontend behavior does not break.
+
+## Acceptance And Test Verification
+
+### 1. Verify Project Structure
+
+Check these paths:
+
+```text
+README.md
+index.html
+src/api.js
+backend/spring-boot/pom.xml
+backend/spring-boot/src/main/java
+backend/spring-boot/src/main/resources/application.yml
+backend/spring-boot/src/main/resources/db/migration
+```
+
+### 2. Check Git Status
+
+```powershell
+git status
+```
+
+Make sure these are not committed:
+
+```text
+.env
+.idea/
+node_modules/
+dist/
+target/
+application-local.yml
+```
+
+### 3. Run Backend Tests And Package
+
+```powershell
+cd backend/spring-boot
+.\mvnw.cmd clean test
+.\mvnw.cmd clean package
+```
+
+Expected:
+
+- tests pass
+- packaging succeeds
+- `target/market-lens-backend-0.1.0-SNAPSHOT.jar` exists
+
+### 4. Verify Flyway
+
+After starting the backend with `FLYWAY_ENABLED=true`:
+
+```powershell
+docker exec -it market-lens-postgres psql -U market_lens -d market_lens -c "\dt"
+docker exec -it market-lens-postgres psql -U market_lens -d market_lens -c "select version, success from flyway_schema_history order by installed_rank;"
+```
+
+Expected core tables:
+
+```text
+users
+stocks
+watchlists
+stock_notes
+daily_quotes
+alert_rules
+alert_events
+market_reviews
+research_items
+job_run_logs
+flyway_schema_history
+```
+
+### 5. Test APIs With curl
+
+Health:
+
+```powershell
+curl http://localhost:8080/api/health
+```
+
+Search stock:
+
+```powershell
+curl "http://localhost:8080/api/stocks/search?keyword=NVDA"
+curl "http://localhost:8080/api/stocks/NVDA"
+```
+
+Add watchlist:
+
+```powershell
+curl -X POST http://localhost:8080/api/watchlist `
+  -H "Content-Type: application/json" `
+  -d "{\"symbol\":\"NVDA\",\"market\":\"US\"}"
+```
+
+List watchlist:
+
+```powershell
+curl http://localhost:8080/api/watchlist
+```
+
+Add note:
+
+```powershell
+curl -X POST http://localhost:8080/api/notes `
+  -H "Content-Type: application/json" `
+  -d "{\"symbol\":\"NVDA\",\"note\":\"AI leader, watch data center revenue and margin.\"}"
+```
+
+Query note by symbol:
+
+```powershell
+curl http://localhost:8080/api/notes/NVDA
+```
+
+Update note:
+
+```powershell
+curl -X PUT http://localhost:8080/api/notes/1 `
+  -H "Content-Type: application/json" `
+  -d "{\"symbol\":\"NVDA\",\"note\":\"Updated thesis after earnings.\"}"
+```
+
+Add alert rule:
+
+```powershell
+curl -X POST http://localhost:8080/api/alerts/rules `
+  -H "Content-Type: application/json" `
+  -d "{\"symbol\":\"NVDA\",\"ruleType\":\"PCT_CHANGE\",\"operator\":\">=\",\"thresholdValue\":3,\"enabled\":true,\"oncePerDay\":true}"
+```
+
+List alert rules:
+
+```powershell
+curl http://localhost:8080/api/alerts/rules
+```
+
+List alert events:
+
+```powershell
+curl http://localhost:8080/api/alerts/events
+```
+
+Get latest daily review:
+
+```powershell
+curl http://localhost:8080/api/market/daily-review
+```
+
+Check the configured provider:
+
+```powershell
+curl -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  http://localhost:8080/api/admin/market-data/providers
+```
+
+Test AKShare without writing to PostgreSQL:
+
+```powershell
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  "http://localhost:8080/api/admin/market-data/test?market=A"
+```
+
+The test endpoint checks today first and then searches backward up to seven
+days for the most recent available trading day.
+
+Ingest A-share quotes:
+
+```powershell
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  "http://localhost:8080/api/admin/market-data/ingest?market=A&tradeDate=2026-06-19"
+```
+
+Run the complete A-share daily job:
+
+```powershell
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  "http://localhost:8080/api/admin/market-daily-job/run?market=A&tradeDate=2026-06-19"
+```
+
+Query the stored quotes:
+
+```powershell
+curl "http://localhost:8080/api/market/daily-quotes?market=A&tradeDate=2026-06-19"
+```
+
+The complete job reads A-share watchlist symbols, fetches quotes, performs an
+idempotent upsert using `(market, symbol, trade_date)`, generates the market
+review, and records the outcome in `job_run_logs`.
+
+### 6. Verify Alert Triggering
+
+Generate mock data first:
+
+```powershell
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  http://localhost:8080/api/admin/market-review/generate
+```
+
+Create a rule matching the mock quote:
+
+```powershell
+curl -X POST http://localhost:8080/api/alerts/rules `
+  -H "Content-Type: application/json" `
+  -d "{\"symbol\":\"NVDA\",\"ruleType\":\"PCT_CHANGE\",\"operator\":\">=\",\"thresholdValue\":3,\"enabled\":true,\"oncePerDay\":true}"
+```
+
+Run the alert engine:
+
+```powershell
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  http://localhost:8080/api/admin/alerts/check
+```
+
+Then verify:
+
+```powershell
+curl http://localhost:8080/api/alerts/events
+```
+
+Expected event fields include:
+
+```text
+stockCode
+triggerPrice
+triggerPct
+triggeredAt
+message
+channel
+```
+
+Run the alert check twice on the same day to verify `oncePerDay=true` prevents duplicate events.
+
+### 7. Verify Daily Review Generation
+
+```powershell
+curl -X POST -H "X-Admin-Token: $env:ADMIN_TOKEN" `
+  http://localhost:8080/api/admin/market-review/generate
+curl http://localhost:8080/api/market/daily-review
+```
+
+This should:
+
+- create or update the latest daily review
+- persist it in `market_reviews`
+- make it available to the frontend research view
+
+### 8. Verify Frontend Uses The Backend
+
+Serve the frontend:
+
+```powershell
+python -m http.server 5173
+```
+
+Open:
+
+```text
+http://localhost:5173/index.html
+```
+
+Then verify in the browser network panel that the page calls:
+
+```text
+/api/watchlist
+/api/notes
+/api/alerts/rules
+/api/market/daily-review
+```
+
+If the backend is unavailable, the page should fall back to local mock/static data and show a backend unavailable state instead of crashing.
+
+### 9. Verify Frontend Build
+
+From the repository root:
+
+```powershell
+npm install
+npm run build
+```
+
+Expected:
+
+- no syntax errors
+- no missing path errors
+- `dist/` is generated
+
+### 10. Confirm No Secrets Leak To Frontend
+
+Search likely secret names:
+
+```powershell
+Select-String -Path index.html,app.js,config.js,src\api.js,market-site\index.html,market-site\app.js,market-site\config.js,market-site\src\api.js `
+  -Pattern "API_KEY|TOKEN|SECRET|DB_PASSWORD|TELEGRAM_BOT_TOKEN|GITHUB_TOKEN"
+```
+
+Expected result:
+
+- no real API key in frontend files
+- no real database password in committed files
+- only public API base URLs or placeholder names
+
+## Cloudflare Worker Update Backend
+
+The repository includes a Cloudflare Worker helper in:
 
 ```text
 backend/cloudflare-worker/
 ```
 
-Deploy it, set the Worker secret:
+It is used to trigger the GitHub Actions daily update without hardcoding a GitHub token into the frontend.
+
+Store the GitHub token only as a backend secret:
 
 ```text
 GITHUB_TOKEN
 ```
 
-Then put the Worker update endpoint in both `config.js` and `market-site/config.js`:
+## GitHub Pages
 
-```js
-window.MARKET_LENS_UPDATE_ENDPOINT = "https://your-worker.workers.dev/api/update";
-```
-
-Once configured, the page's "手动更新数据" button calls the backend directly and no longer asks for a browser token.
-
-## GitHub Pages Deployment
-
-This repository includes a GitHub Actions workflow at:
+The repository includes a Pages workflow at:
 
 ```text
 .github/workflows/pages.yml
 ```
 
-When the repository is pushed to the `main` branch, GitHub Pages deploys the contents of `market-site/`.
-
-The scheduled workflow at:
+The published static copy lives under:
 
 ```text
-.github/workflows/daily-data.yml
+market-site/
 ```
 
-runs on weekdays, regenerates the daily data files, commits them to `main`, and then the Pages workflow publishes the updated site.
+## Automated Test Coverage
 
-In GitHub, enable Pages with:
-
-```text
-Settings -> Pages -> Build and deployment -> Source: GitHub Actions
-```
-
-## Next Steps
-
-- Connect licensed A-share and US stock data APIs.
-- Generate daily JSON files after market close.
-- Add self-selected stocks and historical views.
-- Add automated daily status notifications.
-- Add stock notes and threshold alerts.
-
-## Architecture
-
-See:
+Current backend tests cover:
 
 ```text
-market-site/ARCHITECTURE.md
+StockServiceTest
+WatchlistServiceTest
+StockNoteServiceTest
+AlertRuleServiceTest
+AlertEngineTest
+MarketLensApiIntegrationTest
+AkshareMarketDataProviderTest
+MarketDataProviderFactoryTest
+MarketDataIngestServiceTest
+MarketDailyJobServiceTest
+MarketDataApiTest
 ```

@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.ssh
+repo-git
+_publish_market_lens
+_main_verify_unpack2
+**/target
+**/node_modules
+dist
+*.log
+*.zip
+.env
+.env.*

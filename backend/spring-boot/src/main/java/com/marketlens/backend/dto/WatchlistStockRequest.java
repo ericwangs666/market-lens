@@ -16,7 +16,7 @@ public record WatchlistStockRequest(
         String name,
 
         @NotBlank
-        @Pattern(regexp = "(?i)CN|US|HK|ETF", message = "must be one of CN, US, HK, ETF")
+        @Pattern(regexp = "(?i)A|CN|US|HK|ETF", message = "must be one of A, CN, US, HK, ETF")
         String market
 ) {
 }

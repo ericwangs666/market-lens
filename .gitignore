@@ -10,5 +10,7 @@ repo-git/
 node_modules/
 backend/cloudflare-worker/node_modules/
 scripts/__pycache__/
+__pycache__/
+*.pyc
 *.zip
 a-share-report-2026-06-12.html

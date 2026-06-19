@@ -6,6 +6,7 @@ Market Lens is a market dashboard project with:
 - a Java Spring Boot backend in `backend/spring-boot/`
 - PostgreSQL persistence managed by Flyway
 - Redis-based alert dedupe
+- a Python AKShare worker in `data-worker/` for free A-share daily quotes
 - development-only admin test endpoints for mock data, alert checks, and daily review generation
 
 ## Project Structure
@@ -16,6 +17,7 @@ Market Lens is a market dashboard project with:
 - Backend entry class: `backend/spring-boot/src/main/java/com/marketlens/backend/MarketLensBackendApplication.java`
 - Backend config: `backend/spring-boot/src/main/resources/application.yml`
 - Flyway SQL: `backend/spring-boot/src/main/resources/db/migration/`
+- AKShare worker: `data-worker/fetch_a_daily_quotes.py`
 
 The existing static pages, mock market data, and local fallback behavior are still retained.
 
@@ -90,6 +92,11 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
 SPRING_PROFILES_ACTIVE=dev
+MARKET_DATA_USE_MOCK=false
+MARKET_DATA_FALLBACK_TO_MOCK=true
+MARKET_DATA_PROVIDER_A=AKSHARE
+AKSHARE_PYTHON_COMMAND=python
+AKSHARE_WORKER_PATH=../../data-worker/fetch_a_daily_quotes.py
 ```
 
 Start the backend:
@@ -120,6 +127,58 @@ Expected response:
   "data": "ok"
 }
 ```
+
+## AKShare A-Share Data
+
+Market Lens currently uses AKShare as the preferred A-share provider because it
+is free, does not require a Tushare token, and is suitable for personal
+research and an MVP. The Java backend remains responsible for persistence,
+analysis, reviews, alerts, and APIs. Python only fetches quotes and prints JSON.
+
+Tushare remains a future optional provider design. It is not required for the
+current startup path. US quotes can continue to use mock data or a future Alpha
+Vantage provider.
+
+Install the Python dependencies:
+
+```powershell
+cd data-worker
+pip install -r requirements.txt
+```
+
+Test the worker independently:
+
+```powershell
+python fetch_a_daily_quotes.py `
+  --market A `
+  --tradeDate 2026-06-19 `
+  --symbols "600000,000001"
+```
+
+The worker prints a JSON array to standard output. It never connects to the
+database and contains no API key or database password.
+
+Provider configuration:
+
+```yaml
+market-data:
+  use-mock: false
+  fallback-to-mock: true
+  provider-a: AKSHARE
+  akshare:
+    python-command: ${AKSHARE_PYTHON_COMMAND:python}
+    worker-path: ${AKSHARE_WORKER_PATH:../data-worker/fetch_a_daily_quotes.py}
+```
+
+Use `MARKET_DATA_USE_MOCK=true` to force mock quotes. With mock disabled,
+`provider-a=AKSHARE` invokes the Python worker. If AKShare fails and
+`MARKET_DATA_FALLBACK_TO_MOCK=true`, the ingest continues with mock data and
+writes a `WARNING` row to `job_run_logs`. If fallback is disabled, the task
+fails and writes `FAILED`.
+
+AKShare public data is mainly appropriate for personal research and MVP
+validation. A commercial deployment should move to a formally licensed market
+data provider.
 
 ## Local PostgreSQL
 
@@ -169,6 +228,7 @@ PUT    /api/alerts/rules/{id}
 DELETE /api/alerts/rules/{id}
 GET    /api/alerts/events
 GET    /api/market/daily-review
+GET    /api/market/daily-quotes?market=A&tradeDate=2026-06-19
 ```
 
 Development-only admin endpoints:
@@ -176,6 +236,10 @@ Development-only admin endpoints:
 ```text
 POST /api/admin/alerts/check
 POST /api/admin/market-review/generate
+GET  /api/admin/market-data/providers
+POST /api/admin/market-data/test?market=A
+POST /api/admin/market-data/ingest?market=A&tradeDate=2026-06-19
+POST /api/admin/market-daily-job/run?market=A&tradeDate=2026-06-19
 ```
 
 Legacy compatibility endpoints such as `/api/memos`, `/api/alert-rules`, and `/api/alert-history` are still present so older frontend behavior does not break.
@@ -248,6 +312,7 @@ alert_rules
 alert_events
 market_reviews
 research_items
+job_run_logs
 flyway_schema_history
 ```
 
@@ -327,6 +392,43 @@ Get latest daily review:
 ```powershell
 curl http://localhost:8080/api/market/daily-review
 ```
+
+Check the configured provider:
+
+```powershell
+curl http://localhost:8080/api/admin/market-data/providers
+```
+
+Test AKShare without writing to PostgreSQL:
+
+```powershell
+curl -X POST "http://localhost:8080/api/admin/market-data/test?market=A"
+```
+
+The test endpoint checks today first and then searches backward up to seven
+days for the most recent available trading day.
+
+Ingest A-share quotes:
+
+```powershell
+curl -X POST "http://localhost:8080/api/admin/market-data/ingest?market=A&tradeDate=2026-06-19"
+```
+
+Run the complete A-share daily job:
+
+```powershell
+curl -X POST "http://localhost:8080/api/admin/market-daily-job/run?market=A&tradeDate=2026-06-19"
+```
+
+Query the stored quotes:
+
+```powershell
+curl "http://localhost:8080/api/market/daily-quotes?market=A&tradeDate=2026-06-19"
+```
+
+The complete job reads A-share watchlist symbols, fetches quotes, performs an
+idempotent upsert using `(market, symbol, trade_date)`, generates the market
+review, and records the outcome in `job_run_logs`.
 
 ### 6. Verify Alert Triggering
 
@@ -478,4 +580,9 @@ StockNoteServiceTest
 AlertRuleServiceTest
 AlertEngineTest
 MarketLensApiIntegrationTest
+AkshareMarketDataProviderTest
+MarketDataProviderFactoryTest
+MarketDataIngestServiceTest
+MarketDailyJobServiceTest
+MarketDataApiTest
 ```

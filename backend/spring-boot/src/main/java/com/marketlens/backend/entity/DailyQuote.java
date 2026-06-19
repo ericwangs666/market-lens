@@ -10,6 +10,10 @@ public class DailyQuote extends BaseEntity {
 
     private Long stockId;
 
+    private String market;
+
+    private String symbol;
+
     private LocalDate quoteDate;
 
     private BigDecimal openPrice;
@@ -30,12 +34,30 @@ public class DailyQuote extends BaseEntity {
 
     private BigDecimal turnover;
 
+    private String dataSource;
+
     public Long getStockId() {
         return stockId;
     }
 
     public void setStockId(Long stockId) {
         this.stockId = stockId;
+    }
+
+    public String getMarket() {
+        return market;
+    }
+
+    public void setMarket(String market) {
+        this.market = market;
+    }
+
+    public String getSymbol() {
+        return symbol;
+    }
+
+    public void setSymbol(String symbol) {
+        this.symbol = symbol;
     }
 
     public LocalDate getQuoteDate() {
@@ -116,5 +138,13 @@ public class DailyQuote extends BaseEntity {
 
     public void setTurnover(BigDecimal turnover) {
         this.turnover = turnover;
+    }
+
+    public String getDataSource() {
+        return dataSource;
+    }
+
+    public void setDataSource(String dataSource) {
+        this.dataSource = dataSource;
     }
 }

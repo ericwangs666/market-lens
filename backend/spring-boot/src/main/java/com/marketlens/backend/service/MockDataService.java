@@ -56,10 +56,13 @@ public class MockDataService {
 
         DailyQuote quote = existing == null ? new DailyQuote() : existing;
         quote.setStockId(stock.getId());
+        quote.setMarket(stock.getMarket());
+        quote.setSymbol(stock.getSymbol());
         quote.setQuoteDate(quoteDate);
         quote.setClosePrice(new BigDecimal(closePrice));
         quote.setPctChange(new BigDecimal(pctChange));
         quote.setTurnover(new BigDecimal(turnover));
+        quote.setDataSource("MOCK");
 
         if (existing == null) {
             dailyQuoteMapper.insert(quote);

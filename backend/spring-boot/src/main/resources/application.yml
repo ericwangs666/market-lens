@@ -39,3 +39,11 @@ market-lens:
     telegram-enabled: ${TELEGRAM_ENABLED:false}
     telegram-bot-token: ${TELEGRAM_BOT_TOKEN:}
     telegram-chat-id: ${TELEGRAM_CHAT_ID:}
+
+market-data:
+  use-mock: ${MARKET_DATA_USE_MOCK:false}
+  fallback-to-mock: ${MARKET_DATA_FALLBACK_TO_MOCK:true}
+  provider-a: ${MARKET_DATA_PROVIDER_A:AKSHARE}
+  akshare:
+    python-command: ${AKSHARE_PYTHON_COMMAND:python}
+    worker-path: ${AKSHARE_WORKER_PATH:../data-worker/fetch_a_daily_quotes.py}

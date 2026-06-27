@@ -228,7 +228,7 @@ Render starts the application and Flyway creates or upgrades the Neon schema.
 Verify:
 
 ```powershell
-curl https://market-lens-api.onrender.com/api/health
+curl https://market-lens-api-ericwangs666.onrender.com/api/health
 ```
 
 The free Render web service sleeps after inactivity and can take about one
@@ -248,7 +248,7 @@ Example:
 ```powershell
 curl -X POST `
   -H "X-Admin-Token: $env:ADMIN_TOKEN" `
-  "https://market-lens-api.onrender.com/api/admin/market-daily-job/run?market=A"
+  "https://market-lens-api-ericwangs666.onrender.com/api/admin/market-daily-job/run?market=A"
 ```
 
 Requests with a missing or incorrect token return HTTP 401. The admin token is
@@ -260,7 +260,7 @@ frontend.
 Add these repository Actions secrets:
 
 ```text
-MARKET_LENS_BACKEND_URL=https://market-lens-api.onrender.com
+MARKET_LENS_BACKEND_URL=https://market-lens-api-ericwangs666.onrender.com
 MARKET_LENS_ADMIN_TOKEN=<the same ADMIN_TOKEN configured in Render>
 ```
 

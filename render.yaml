@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: market-lens-api
+    name: market-lens-api-ericwangs666
     runtime: docker
     plan: free
     region: singapore
